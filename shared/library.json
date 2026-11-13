@@ -1,0 +1,7 @@
+{
+  "name": "ufo_shared",
+  "version": "0.1.0",
+  "description": "UFO Game ESP-NOW device protocol: framing, messages, reliability, device core, ESP-NOW transport",
+  "frameworks": "*",
+  "platforms": "*"
+}
