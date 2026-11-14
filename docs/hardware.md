@@ -9,7 +9,7 @@ python3 tests/tools/gen_secrets.py               # config/secrets.h（システ�
 ```
 
 実ファイルがない場合はサンプルでビルドされ、機器は `example_keys` / `example_devices` を報告する（Hub の画面下部に赤帯（ATOM Lite の Hub では状態 LED が 5 秒ごとに赤）、`HELLO_ACK` / `DIAG` / ゲートウェイのログ警告）。
-`-DUFO_REQUIRE_SECRETS` を付けると `secrets.h` がない場合にビルドエラーにできる。
+機器のファームウェアは `devices.h` / `secrets.h` がないとビルドエラーになる（サンプルの MAC・鍵では Hub と通信できないため）。コンパイル確認だけなら `PLATFORMIO_BUILD_FLAGS=-DUFO_ALLOW_EXAMPLE_CONFIG pio run`。別の PC で書き込む手順は [README](../README.md#別の-pc-でビルド書込みするとき必ずやること)。
 
 ## 共通
 

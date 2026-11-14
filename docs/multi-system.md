@@ -48,6 +48,7 @@ ATOM Lite を Hub にする場合は `hub_atomlite_s1` / `hub_atomlite_s2`（画
 2. **MAC を登録する**: `cp config/devices.example.h config/devices.h` を実行し、**1 つのファイルに両システムの MAC を書く**。
    * 各機器はシリアルに `UFO system=N device id=.. MAC=..` を出す。Hub の MAC は `BOOT` 行の `hub_mac` で確認する。
    * 両システムを同じファイルに書くことで、上記の起動時チェックが「同じ MAC を両方に書いた」ミスを見つけられる。
+   * 作った `devices.h` と `secrets.h` は、書き込みに使うすべての PC に**手渡しでコピー**する（別の PC で `gen_secrets.py` を実行し直さない）。ファイルがない PC ではファームウェアがビルドエラーになる。手順は [README](../README.md#別の-pc-でビルド書込みするとき必ずやること)。
 3. **チャネルを決める**: 会場の Wi-Fi を事前に確認し、混んでいないチャネルを選ぶ。既定は 1 と 11。
    * 会場の AP が 1 / 6 / 11 を使っている場合でも ESP-NOW は動く（CSMA で譲り合う）が、遅延と再送が増える。`ufo_cli.py probe` で計測して判断する。
 4. **書き込む**: 機器ごとに `_s1` / `_s2` の env を選ぶ。機器にはシステム番号のラベルを貼っておく。
