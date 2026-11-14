@@ -7,6 +7,9 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_idf_version.h>
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+#include <esp_mac.h>  // esp_read_mac / ESP_MAC_WIFI_STA moved here in IDF 5 (Arduino-ESP32 3.x)
+#endif
 #include <esp_now.h>
 #include <esp_wifi.h>
 #include <freertos/FreeRTOS.h>
