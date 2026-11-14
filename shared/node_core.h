@@ -64,6 +64,7 @@ class NodeTransport {
 };
 
 struct NodeConfig {
+  uint8_t system_id = 1;  // UFO system in the venue (selects the packet magic)
   uint8_t self_id = 0;
   DeviceType device_type = DeviceType::Dial;
   uint8_t hub_id = 0x01;

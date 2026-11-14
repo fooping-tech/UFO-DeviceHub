@@ -92,8 +92,22 @@ void test_payload_codecs_strict_length() {
   TEST_ASSERT_TRUE(decodeSetLightMode(b + 1, n - 1, out));
   TEST_ASSERT_EQUAL(500, out.transition_ms);
   TEST_ASSERT_FALSE(decodeSetLightMode(b + 1, n - 2, out));
-  b[1] = 8;  // mode out of range
+  b[1] = 14;  // mode out of range (NIGHT = 13 is the last)
   TEST_ASSERT_FALSE(decodeSetLightMode(b + 1, n - 1, out));
+
+  SetMistParams sm;
+  sm.pattern = static_cast<uint8_t>(MistPattern::Breath);
+  sm.duration_s = 300;
+  n = encodeSetMist(sm, b, sizeof(b));
+  TEST_ASSERT_EQUAL(4, n);
+  SetMistParams smo;
+  TEST_ASSERT_TRUE(decodeSetMist(b + 1, n - 1, smo));
+  TEST_ASSERT_EQUAL(300, smo.duration_s);
+  b[1] = 4;  // unknown pattern
+  TEST_ASSERT_FALSE(decodeSetMist(b + 1, n - 1, smo));
+  TEST_ASSERT_TRUE(commandRequiresSession(static_cast<uint8_t>(CommandCode::SetMist)));
+  TEST_ASSERT_EQUAL_HEX16(0x5546, systemMagic(1));
+  TEST_ASSERT_EQUAL_HEX16(0x5547, systemMagic(2));
 
   RelayPulseParams rp;
   rp.duration_ms = 0;
@@ -145,7 +159,7 @@ void test_golden_vectors() {
   for (JsonObject v : arr) {
     auto bytes = fromHex(v["hex"].as<std::string>());
     Packet p;
-    DecodeError e = decodePacket(bytes.data(), bytes.size(), p);
+    DecodeError e = decodePacket(bytes.data(), bytes.size(), p, systemMagic(v["system_id"] | 1));
     const char* expect_err = v["error"] | "";
     if (expect_err[0]) {
       TEST_ASSERT_EQUAL_STRING_MESSAGE(expect_err, decodeErrorName(e), v["name"].as<const char*>());

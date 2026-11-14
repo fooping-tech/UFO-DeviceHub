@@ -39,5 +39,18 @@ const uint8_t* primaryMasterKey();  // 16 bytes
 bool usingExampleKeys();     // config/secrets.h missing -> example keys (NOT for production)
 bool usingExampleDevices();  // config/devices.h missing -> example MACs
 uint8_t wifiChannel();
+uint8_t systemId();  // UFO_SYSTEM_ID of this firmware (1..)
+
+// Cross-system checks of the provisioning (both systems are in config/):
+//   SharedMac / SharedKeys / BadChannel are errors, SameChannel / Overlapping
+//   are warnings (still isolated by magic + keys + MAC table, but they share airtime).
+constexpr uint8_t kSepSharedMac = 0x01;
+constexpr uint8_t kSepSharedKeys = 0x02;
+constexpr uint8_t kSepBadChannel = 0x04;
+constexpr uint8_t kSepSameChannel = 0x08;
+constexpr uint8_t kSepOverlappingChannel = 0x10;
+constexpr uint8_t kSepErrors = kSepSharedMac | kSepSharedKeys | kSepBadChannel;
+uint8_t systemSeparationIssues();
+const char* systemSeparationText(uint8_t issues);  // most important issue
 
 }  // namespace ufo

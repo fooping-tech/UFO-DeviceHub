@@ -70,17 +70,23 @@ class LineTransport(Protocol):
 _PORT_HINTS = ("usbserial", "usbmodem", "SLAB", "wchusb", "ttyUSB", "ttyACM")
 
 
-def guess_port() -> str | None:
+def guess_ports() -> list[str]:
+    """Candidate hub ports, most likely first."""
     try:
         from serial.tools import list_ports
     except ImportError:  # pragma: no cover
-        return None
+        return []
     ports = [p.device for p in list_ports.comports()]
-    for dev in ports:
-        if any(h in dev for h in _PORT_HINTS) and "Bluetooth" not in dev and not dev.startswith("/dev/tty."):
-            return dev
-    for dev in ports:
-        if "Bluetooth" not in dev and not dev.startswith("/dev/tty."):
+    usable = [d for d in ports if "Bluetooth" not in d and not d.startswith("/dev/tty.")]
+    return [d for d in usable if any(h in d for h in _PORT_HINTS)] + [
+        d for d in usable if not any(h in d for h in _PORT_HINTS)
+    ]
+
+
+def guess_port(exclude: Iterable[str] = ()) -> str | None:
+    ex = set(exclude)
+    for dev in guess_ports():
+        if dev not in ex:
             return dev
     return None
 
@@ -96,15 +102,29 @@ class SerialLineTransport:
         self._buf = bytearray()
         self._discarding = False
         self.oversize_lines = 0
+        self.current_port: str | None = None
+        self._rejected: set[str] = set()  # auto mode: hubs of another UFO system
+
+    def reject_current(self) -> None:
+        """Auto mode: the open port is the hub of another system - try the others."""
+        if self.port == "auto" and self.current_port:
+            self._rejected.add(self.current_port)
 
     def open(self) -> None:
         try:
             import serial
         except ImportError as e:  # pragma: no cover
             raise TransportError("pyserial is not installed (pip install -r pc/requirements.txt)") from e
-        port = guess_port() if self.port == "auto" else self.port
+        if self.port == "auto":
+            port = guess_port(self._rejected)
+            if not port and self._rejected:
+                self._rejected.clear()  # every hub refused: start over (a hub may have been re-flashed)
+                port = guess_port()
+        else:
+            port = self.port
         if not port:
             raise TransportError("no serial port found")
+        self.current_port = port
         try:
             # timeouts: reads never block forever, writes fail instead of hanging
             self._ser = serial.Serial(port, self.baudrate, timeout=0.05, write_timeout=1.0)
@@ -170,7 +190,14 @@ class DeviceGateway:
         hub_timeout: float = 3.0,
         reconnect_interval: float = 1.0,
         event_dedup_size: int = 512,
+        system_id: int | None = None,
     ) -> None:
+        """system_id: the UFO system (1, 2) this game belongs to. The gateway then
+        only attaches to that system's hub (the hub answers SYSTEM_MISMATCH
+        otherwise; with port="auto" the other serial ports are tried)."""
+        if system_id is not None and not 1 <= system_id <= P.MAX_SYSTEM_ID:
+            raise ValueError(f"system_id must be 1..{P.MAX_SYSTEM_ID}")
+        self.system_id = system_id
         self._transport: LineTransport = transport or SerialLineTransport(port, baudrate)
         self.command_timeout = command_timeout
         self.heartbeat_interval = heartbeat_interval
@@ -373,6 +400,23 @@ class DeviceGateway:
     def relay_off(self, relay_id: int = 255, device: int = DeviceId.ILLUMINATION, **kw) -> CommandResult:
         return self.send_command(device, "RELAY_OFF", {"relay_id": relay_id}, **kw)
 
+    def set_mist(
+        self,
+        pattern: str | P.MistPattern = "CONTINUOUS",
+        duration_s: int = 0,
+        device: int = DeviceId.ILLUMINATION,
+        **kw,
+    ) -> CommandResult:
+        """Mist module: CONTINUOUS / BREATH (8 s on, 6 s off) / PUFF (3 s on, 9 s off).
+
+        duration_s = 0 runs up to the device maximum (10 min); longer requests are
+        clamped. The end is reported by the MIST_DONE event. OFF stops it.
+        """
+        return self.send_command(device, "SET_MIST", {"pattern": pattern, "duration_s": duration_s}, **kw)
+
+    def mist_off(self, device: int = DeviceId.ILLUMINATION, **kw) -> CommandResult:
+        return self.send_command(device, "SET_MIST", {"pattern": "OFF"}, **kw)
+
     # M5Dial ------------------------------------------------------------------
     def set_mode(self, device_id: int, mode: str | P.OperationMode, **kw) -> CommandResult:
         """STANDBY / GAME. Dials accept ARM_RECEIVER / RELEASE_BALL only in GAME."""
@@ -458,7 +502,7 @@ class DeviceGateway:
             self._next_command_id = random.randint(1, 0x3FFFFFFF)
             self._seen_events.clear()
         self._hello_sent_at = time.monotonic()
-        self._write(P.hello(self._session_id))
+        self._write(P.hello(self._session_id, self.system_id))
 
     def _fail_all_pending(self, why: str) -> None:
         with self._lock:
@@ -546,6 +590,9 @@ class DeviceGateway:
     def _on_hello_ack(self, m: dict) -> None:
         if m.get("session_id") != self._session_id:
             return
+        if self.system_id is not None and m.get("system_id") != self.system_id:
+            # an old hub firmware that does not check HELLO.system_id itself
+            self._wrong_system(f"hub reports system {m.get('system_id')}")
         self.hub_info = m
         if m.get("example_keys"):
             log.warning("hub reports EXAMPLE ESP-NOW KEYS - not for production (tests/tools/gen_secrets.py)")
@@ -661,7 +708,17 @@ class DeviceGateway:
             log.warning("hub session %s != ours: re-synchronising", sid)
             self._new_session()
 
+    def _wrong_system(self, detail: str) -> None:
+        log.error("this hub belongs to another UFO system (%s), want system %s", detail, self.system_id)
+        reject = getattr(self._transport, "reject_current", None)
+        if reject:
+            reject()
+        raise TransportError("hub of another UFO system")
+
     def _on_error(self, m: dict) -> None:
+        if m.get("code") == "SYSTEM_MISMATCH":
+            self._emit(DeviceEvent("HUB_ERROR", None, {"code": m.get("code"), "detail": m.get("detail")}))
+            self._wrong_system(str(m.get("detail")))
         log.warning("hub error %s: %s", m.get("code"), m.get("detail"))
         self._emit(DeviceEvent("HUB_ERROR", None, {"code": m.get("code"), "detail": m.get("detail")}))
 

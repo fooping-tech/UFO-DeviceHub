@@ -41,6 +41,46 @@ void test_hello_ack() {
   TEST_ASSERT_FALSE(d["hub_mac"].isNull());
 }
 
+void test_hello_system_id() {
+  World w;
+  w.pc("{\"type\":\"HELLO\",\"session_id\":5,\"system_id\":2}");  // this hub is system 1
+  TEST_ASSERT_EQUAL_STRING("SYSTEM_MISMATCH", w.out.lastOf("ERROR")["code"]);
+  TEST_ASSERT_EQUAL(0, w.hub.session());
+  w.pc("{\"type\":\"HELLO\",\"session_id\":6,\"system_id\":1}");
+  JsonDocument d = w.out.lastOf("HELLO_ACK");
+  TEST_ASSERT_EQUAL(6, d["session_id"].as<uint32_t>());
+  TEST_ASSERT_EQUAL(1, d["system_id"].as<int>());
+}
+
+void test_set_mist_validation_and_status() {
+  World w;
+  online(w);
+  w.hello(77);
+  w.run(50);
+  uint32_t id = w.command(ILL, "SET_MIST", "{\"pattern\":\"FOG\"}");
+  TEST_ASSERT_EQUAL_STRING("BAD_REQUEST", w.ackFor(id)["result"]);
+  id = w.command(ILL, "SET_MIST", "{\"pattern\":\"BREATH\",\"duration_s\":70000}");
+  TEST_ASSERT_EQUAL_STRING("BAD_REQUEST", w.ackFor(id)["result"]);
+  id = w.command(ILL, "SET_MIST", "{\"pattern\":\"PUFF\",\"duration_s\":30}");
+  w.run(50);
+  TEST_ASSERT_EQUAL_STRING("ACCEPTED", w.ackFor(id)["result"]);
+  w.command(ILL, "GET_STATUS");
+  w.run(50);
+  JsonDocument st = w.out.lastOf("STATUS");
+  TEST_ASSERT_EQUAL_STRING("PUFF", st["mist_pattern"]);
+  TEST_ASSERT_TRUE(st["mist_on"].as<bool>());
+  TEST_ASSERT_EQUAL_STRING("MIST_ACTIVE", st["state"]);
+  TEST_ASSERT_EQUAL(30, st["mist_remaining_s"].as<int>());
+  id = w.command(ILL, "SET_LIGHT_MODE", "{\"mode\":\"MAGIC_PUFF\"}");
+  w.run(50);
+  TEST_ASSERT_EQUAL_STRING("ACCEPTED", w.ackFor(id)["result"]);
+  w.command(ILL, "SET_MIST", "{\"pattern\":\"OFF\"}");
+  w.run(100);
+  JsonDocument ev = w.out.lastOf("EVENT");
+  TEST_ASSERT_EQUAL_STRING("MIST_DONE", ev["name"]);
+  TEST_ASSERT_EQUAL(1, ev["data"]["reason"].as<int>());  // OFF_COMMAND
+}
+
 void test_command_validation() {
   World w;
   online(w);
@@ -127,6 +167,8 @@ int main() {
   RUN_TEST(test_bad_lines);
   RUN_TEST(test_hello_ack);
   RUN_TEST(test_command_validation);
+  RUN_TEST(test_hello_system_id);
+  RUN_TEST(test_set_mist_validation_and_status);
   RUN_TEST(test_frames_from_unknown_mac_or_wrong_id_ignored);
   RUN_TEST(test_devices_and_diag);
   RUN_TEST(test_pc_timeout_closes_session);

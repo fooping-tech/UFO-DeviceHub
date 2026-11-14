@@ -2,20 +2,57 @@
 
 UFO Game の ESP マイコン系デバイス（Hub、Illumination、M5Dial ×2）の通信システム。
 共通プロトコル、4 種類のファームウェア、PC 用 Python ライブラリ、Mock、テストを 1 つのプロジェクトで管理する。
+**同じ会場で 2 システムを同時に運用できる**（チャネル・鍵・MAC 表・パケット magic をシステムごとに分離。[docs/multi-system.md](docs/multi-system.md)）。
+
+## システム全体の通信構成
+
+![UFO Game：ESPマイコン系デバイス 通信構成図](docs/images/system-overview.png)
+
+| 機器 | 役割 | 接続 |
+|---|---|---|
+| PC（開発・AI・演出） | ゲーム制御ロジック、画像処理（MediaPipe / JEV）、演出・UI（Godot 等） | Core2 と ESP-NOW 用 ATOM にそれぞれ USB シリアル |
+| M5Stack Core2（メインコントローラ） | 全体制御・モード管理、画面表示・操作受付 | PC から USB、Core XYZ へ有線 |
+| Core XYZ（XYZ 駆動コントローラ） | X/Y/Z 軸のモータ制御（TMC2209 等）、位置制御 | Core2 から有線 |
+| コントローラ ATOM | 物理コントローラ（ボタン・ジェスチャー等） | Core2 と ESP-NOW |
+| **ESP-NOW 用ハブ（M5AtomS3R）** | 子機との無線連携、中継。画面にシステム番号・チャネル・接続状態を表示 | PC から USB、子機と無線 |
+| **イルミ ATOM** | WS2811 テープ + COB テープの照明演出、ミスト（噴霧）モジュール、本体ボタンでのローカル演出 | ハブと無線 |
+| **M5Dial ×2** | ボール受取スイッチ、SG90 によるボール排出、状態表示 | ハブと無線 |
+
+**このリポジトリが扱うのは太字の 4 台（ESP-NOW 用 ATOM ハブ、イルミ ATOM、M5Dial ×2）と、PC 側のクライアントライブラリ。**
+Core2・Core XYZ・コントローラ ATOM は 別リポジトリ（CoreXY_UFO / CoreXY_UFO_Game）で扱う。
+
+図ではハブと子機の間が「Wi-Fi（LAN 内通信）」と描かれているが、実装は AP に接続しない **ESP-NOW の暗号化ユニキャスト（固定チャネル）**。
 
 ```
-PC (pc/DeviceGateway) --USB JSON Lines--> M5ATOM Hub --ESP-NOW 暗号化ユニキャスト--> Illumination ATOM / M5Dial #1 / M5Dial #2
+PC (pc/DeviceGateway) --USB JSON Lines--> Hub (M5AtomS3R) --ESP-NOW 暗号化ユニキャスト--> Illumination ATOM / M5Dial #1 / M5Dial #2
 ```
 
 * ゲームロジックは PC のみ。Hub は中継・再送・セッション・死活監視、子機は I/O とフェイルセーフだけ。
-* 詳細: [docs/protocol.md](docs/protocol.md)（プロトコル・API）, [docs/architecture.md](docs/architecture.md), [docs/hardware.md](docs/hardware.md)（ピン・角度・安全仕様）, [docs/test-plan.md](docs/test-plan.md)（自動テストと実機確認手順）
+* 詳細: [docs/multi-system.md](docs/multi-system.md)（2 システム運用・混信対策）, [docs/protocol.md](docs/protocol.md)（プロトコル・API）, [docs/architecture.md](docs/architecture.md), [docs/hardware.md](docs/hardware.md)（ピン・角度・安全仕様）, [docs/test-plan.md](docs/test-plan.md)（自動テストと実機確認手順）
+
+## 同じ会場で 2 システムを動かす（混信対策）
+
+| 層 | システム 1 | システム 2 |
+|---|---|---|
+| 2.4GHz チャネル（既定） | 1 | 11 |
+| MAC 許可リスト | `UFO_S1_MAC_*` | `UFO_S2_MAC_*` |
+| ESP-NOW 鍵 | `UFO_S1_PMK/LMK_*` | `UFO_S2_PMK/LMK_*` |
+| パケット magic | `0x5546` | `0x5547` |
+| PC 側 | `DeviceGateway(system_id=1)` | `DeviceGateway(system_id=2)` |
+| PlatformIO env | `*_s1` | `*_s2` |
+
+* 他システムのフレームは「MAC 不一致 → 復号失敗 → magic 不一致」のいずれかで必ず捨てられる。設定を取り違えても、別システムの機器は動かない。
+* 起動時に両システムの設定を照合する。MAC や鍵の共有、範囲外のチャネルがあれば **無線を起動せず**、Hub の画面とログに表示する。チャネルが同じ、または近い場合は警告を出す。
+* `HELLO` に `system_id` を付けると、別システムの Hub は `SYSTEM_MISMATCH` を返してセッションを張らない（USB の挿し間違いを防ぐ）。
+
+詳細と現地での確認手順: [docs/multi-system.md](docs/multi-system.md)
 
 ## セットアップ
 
 ```sh
-cp config/devices.example.h  config/devices.h     # 4 台の MAC と Wi-Fi チャネル
+cp config/devices.example.h  config/devices.h     # 両システムの MAC とチャネル（1 ファイルに両方書く）
 cp config/hardware.example.h config/hardware.h    # ピン・リレー極性・サーボ角度
-python3 tests/tools/gen_secrets.py                # config/secrets.h（ESP-NOW 鍵を乱数生成）
+python3 tests/tools/gen_secrets.py                # config/secrets.h（システムごとの ESP-NOW 鍵。足りない分だけ追記）
 ```
 
 `config/devices.h`, `hardware.h`, `secrets.h` は git 管理外。ない場合はサンプル値でビルドされ、機器が `example_keys` / `example_devices` を報告する。
@@ -23,30 +60,36 @@ python3 tests/tools/gen_secrets.py                # config/secrets.h（ESP-NOW �
 ## ビルド・書込み
 
 ```sh
-pio run                                  # hub, illumination, m5dial_1, m5dial_2
-pio run -e hub          -t upload        # M5ATOM Hub
-pio run -e illumination -t upload        # Illumination ATOM (ID 0x10)
-pio run -e m5dial_1     -t upload        # M5Dial #1 (ID 0x20)
-pio run -e m5dial_2     -t upload        # M5Dial #2 (ID 0x21)
-pio run -e noise        -t upload        # 試験用: 他展示を模擬するノイズ送信機
-pio run -e illum_mist    -t upload       # 単体 Illumination 演出（ATOM Lite、通信なし）
-pio run -e illum_mist_s3 -t upload       # 同上（AtomS3 Lite）
+pio run                                       # 両システム × 4 台（hub_s1 ... m5dial_2_s2）
+pio run -e hub_s1          -t upload          # Hub (M5AtomS3R)            システム 1
+pio run -e illumination_s1 -t upload          # Illumination ATOM (0x10)  システム 1
+pio run -e m5dial_1_s1     -t upload          # M5Dial #1 (0x20)          システム 1
+pio run -e m5dial_2_s1     -t upload          # M5Dial #2 (0x21)          システム 1
+pio run -e hub_s2          -t upload          # ... システム 2 は _s2
+pio run -e hub_atomlite_s1 -t upload          # Hub を ATOM Lite にする場合（画面なし、状態 LED）
+pio run -e noise           -t upload          # 試験用: 他展示を模擬するノイズ送信機
 ```
 
-### 単体 Illumination 演出（atom_led_mist）
+### Illumination ATOM（LED + ミスト）
 
-`firmware/atom_led_mist/atom_led_mist.ino` は Hub / ESP-NOW を使わずに単体で動く照明・噴霧の演出スケッチ。
-COB テープ（Atomic PWM Base）、WS2811 テープ、噴霧モジュール（Unit 2Relay）をボタンでシーン切替する。
-Arduino IDE でもこのファイルをそのまま開いて書き込める（ライブラリ: FastLED）。
-ピン・操作・安全設定は [docs/hardware.md](docs/hardware.md#単体-illumination-演出atom_led_mist) を参照。
+ATOM Lite + Atomic PWM Base + Unit 2Relay。旧 `atom_led_mist` スケッチの機能を illumination ファームウェアに統合した。
+
+| 出力 | ピン | 制御 |
+|---|---|---|
+| WS2811 テープ（12V, 70 IC） | G21 | `SET_LIGHT_MODE` / `TRIGGER_EFFECT` |
+| COB テープ（電球色 12V, PWM） | G22 | モード・演出に連動して明るさが変わる |
+| ミストモジュール（Unit 2Relay RELAY-2） | G32 | `SET_MIST`（CONTINUOUS / BREATH 8 秒出す・6 秒休む / PUFF 3 秒出す・9 秒休む、1 回最大 10 分） |
+| 本体ボタン | G39 | PC のセッションがないとき: 短押し = 次のシーン、長押し = ミスト ON/OFF。長押しは PC 制御中でもミストを止める |
+
+照明モードに `AURORA, STORM, CAMPFIRE, MIST_GLOW, MAGIC_PUFF, NIGHT` を追加した。詳細は [docs/hardware.md](docs/hardware.md#illumination-atomdevice-id-0x10)。
 
 （`pio` が PATH にない場合は `~/.platformio/penv/bin/pio`）
 
 ## テスト
 
 ```sh
-pio test -e native                                              # ファームウェアのロジック 63 件
-uv run --no-project --with pyserial --with pytest python -m pytest    # Python 84 件（Mock 使用）
+pio test -e native                                              # ファームウェアのロジック 74 件
+uv run --no-project --with pyserial --with pytest python -m pytest    # Python 103 件（Mock 使用）
 ```
 
 ## PC から使う
@@ -54,7 +97,7 @@ uv run --no-project --with pyserial --with pytest python -m pytest    # Python 8
 ```python
 from pc import DeviceGateway, DeviceId
 
-gw = DeviceGateway(port="auto")
+gw = DeviceGateway(port="auto", system_id=1)   # このゲームはシステム 1
 gw.subscribe(lambda ev: print(ev.name, ev.source, ev.data))
 gw.connect()
 
@@ -62,19 +105,34 @@ gw.set_light_mode("GAME_PLAY", brightness=180)
 gw.set_mode(DeviceId.M5DIAL_1, "GAME")
 gw.arm_receiver(DeviceId.M5DIAL_1)       # → BALL_RECEIVED イベント
 gw.release_ball(DeviceId.M5DIAL_1)       # → RELEASE_STARTED / RELEASE_DONE
-gw.relay_pulse(1500)                     # 蒸気（最大 3000 ms）
+gw.set_light_mode("AURORA")
+gw.set_mist("BREATH", duration_s=120)    # ミスト（終了時に MIST_DONE イベント）
+gw.mist_off()
+gw.relay_pulse(1500)                     # 蒸気リレー（設定時のみ、最大 3000 ms）
 ```
 
-手動操作・現地診断: `python3 tests/tools/ufo_cli.py --port auto devices|diag|probe|light|effect|steam|game|release|stop|monitor`
+### ブラウザから試験する
+
+```sh
+python3 -m pc.web_console --system 1                       # Hub を自動検出し、ブラウザで http://127.0.0.1:8765/ を開く
+python3 -m pc.web_console --system 1 --port /dev/cu.usbmodem114101
+python3 -m pc.web_console --port mock                      # ハードウェアなし（Mock）
+```
+
+照明モード・演出・ミスト・蒸気リレー・M5Dial（GAME / ARM / RELEASE）の操作、各機器の STATUS、オンライン状態・RTT、診断、イベントのライブ表示、STOP ALL ができる。
+命令はゲームと同じ `DeviceGateway` を通る（セッション・ACK・再送・EVENT_ACK）。Hub のシリアルポートは 1 つのプログラムしか開けないので、ゲームや `ufo_cli.py` は止めてから使う。
+既定では自分の PC（127.0.0.1）からしか開けない。他のサイトからの命令送信（CSRF・DNS リバインディング）も拒否する。
+
+手動操作・現地診断: `python3 tests/tools/ufo_cli.py --system 1 --port auto devices|diag|probe|light|effect|mist|steam|game|release|stop|monitor`
 （`--port mock` でハードウェアなし）
 
 ## ディレクトリ
 
 ```
 shared/        共通プロトコル（パケット、payload、信頼性、子機コア、ESP-NOW、LED 演出）
-firmware/      hub/, illumination/, m5dial/, atom_led_mist/（単体 Illumination 演出）
+firmware/      hub/（AtomS3R 画面表示を含む）, illumination/（LED・COB・ミスト・ボタン）, m5dial/
 config/        *.example.h（実設定はコピーして作成）
-pc/            protocol.py, device_gateway.py, mock_hub.py
+pc/            protocol.py, device_gateway.py, mock_hub.py, web_console.py + web/（ブラウザ試験画面）
 tests/         firmware/（Unity, native）, protocol/, integration/（pytest）, tools/
 docs/
 ```

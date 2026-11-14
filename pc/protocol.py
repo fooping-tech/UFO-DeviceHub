@@ -19,7 +19,8 @@ from enum import IntEnum, IntFlag
 from typing import Any
 
 PROTOCOL_VERSION = 1
-MAGIC = 0x5546
+MAGIC = 0x5546  # system 1; system n uses MAGIC + n - 1 (see system_magic)
+MAX_SYSTEM_ID = 8
 HEADER_SIZE = 17
 MAX_PACKET_SIZE = 64
 MAX_PAYLOAD = MAX_PACKET_SIZE - HEADER_SIZE  # 47
@@ -28,6 +29,13 @@ HUB_COMMAND_BIT = 0x80000000  # command ids >= this are reserved for the hub
 
 _HEADER = struct.Struct("<HBBBBHIIB")
 assert _HEADER.size == HEADER_SIZE
+
+
+def system_magic(system_id: int) -> int:
+    """Packet magic of a UFO system (several systems share one venue)."""
+    if not 1 <= system_id <= MAX_SYSTEM_ID:
+        raise ValueError(f"system_id must be 1..{MAX_SYSTEM_ID}")
+    return MAGIC + system_id - 1
 
 
 class ProtocolError(ValueError):
@@ -61,6 +69,7 @@ class CommandCode(IntEnum):
     TRIGGER_EFFECT = 0x11
     RELAY_PULSE = 0x12
     RELAY_OFF = 0x13
+    SET_MIST = 0x14
     ARM_RECEIVER = 0x20
     DISARM_RECEIVER = 0x21
     RELEASE_BALL = 0x22
@@ -72,6 +81,7 @@ class EventCode(IntEnum):
     RELEASE_DONE = 0x12
     RELEASE_FAILED = 0x13
     RELAY_DONE = 0x20
+    MIST_DONE = 0x21
     DEVICE_ERROR = 0x30
 
 
@@ -120,6 +130,24 @@ class LightMode(IntEnum):
     RESULT = 0x05
     ERROR = 0x06
     CUSTOM = 0x07
+    AURORA = 0x08
+    STORM = 0x09
+    CAMPFIRE = 0x0A
+    MIST_GLOW = 0x0B
+    MAGIC_PUFF = 0x0C
+    NIGHT = 0x0D
+
+
+class MistPattern(IntEnum):
+    OFF = 0x00
+    CONTINUOUS = 0x01
+    BREATH = 0x02  # 8 s on / 6 s off
+    PUFF = 0x03  # 3 s on / 9 s off
+
+
+class MistStatusFlag(IntFlag):
+    OUTPUT_ON = 0x01
+    LOCAL_MODE = 0x02
 
 
 class EffectId(IntEnum):
@@ -150,6 +178,7 @@ class IlluminationState(IntEnum):
     NORMAL = 0x00
     EFFECT = 0x01
     RELAY_ACTIVE = 0x02
+    MIST_ACTIVE = 0x03
     ERROR = 0x07
 
 
@@ -164,6 +193,7 @@ class RelayEndReason(IntEnum):
     OFF_COMMAND = 0x01
     SAFETY = 0x02
     WATCHDOG = 0x03
+    LOCAL_BUTTON = 0x04
 
 
 class ErrorCode(IntEnum):
@@ -218,6 +248,7 @@ COMMAND_PARAM_LENGTH = {
     CommandCode.TRIGGER_EFFECT: 4,
     CommandCode.RELAY_PULSE: 3,
     CommandCode.RELAY_OFF: 1,
+    CommandCode.SET_MIST: 3,
     CommandCode.ARM_RECEIVER: 0,
     CommandCode.DISARM_RECEIVER: 0,
     CommandCode.RELEASE_BALL: 0,
@@ -308,6 +339,11 @@ def normalize_command(name: str, params: dict | None = None) -> dict:
         return {"relay_id": _uint(p, "relay_id", 254, 0), "duration_ms": d}
     if code == CommandCode.RELAY_OFF:
         return {"relay_id": _uint(p, "relay_id", 255, 255)}
+    if code == CommandCode.SET_MIST:
+        return {
+            "pattern": MistPattern(_enum_value(MistPattern, p.get("pattern"), what="pattern")).name,
+            "duration_s": _uint(p, "duration_s", 65535, 0),
+        }
     raise ProtocolError(f"unhandled command {name}")  # pragma: no cover
 
 
@@ -337,10 +373,17 @@ def decode_line(line: str | bytes) -> dict:
     return msg
 
 
-def hello(session_id: int) -> dict:
+def hello(session_id: int, system_id: int | None = None) -> dict:
+    """HELLO. With system_id the hub refuses the session unless it belongs to that
+    system (ERROR SYSTEM_MISMATCH) - two UFO systems can share one venue / PC."""
     if not 0 < session_id <= 0xFFFFFFFF:
         raise ProtocolError("session_id must be a non-zero uint32")
-    return {"protocol_version": PROTOCOL_VERSION, "type": "HELLO", "session_id": session_id}
+    m = {"protocol_version": PROTOCOL_VERSION, "type": "HELLO", "session_id": session_id}
+    if system_id is not None:
+        if not 1 <= system_id <= MAX_SYSTEM_ID:
+            raise ProtocolError(f"system_id must be 1..{MAX_SYSTEM_ID}")
+        m["system_id"] = system_id
+    return m
 
 
 def command(destination: int, session_id: int, command_id: int, name: str, params: dict | None = None) -> dict:
@@ -401,13 +444,14 @@ class Packet:
         )
 
     @classmethod
-    def decode(cls, data: bytes) -> Packet:
+    def decode(cls, data: bytes, magic: int = MAGIC) -> Packet:
+        """magic: system_magic(n) of the system the frame must belong to."""
         if len(data) < HEADER_SIZE:
             raise ProtocolError("too_short")
         if len(data) > MAX_PACKET_SIZE:
             raise ProtocolError("too_long")
-        magic, ver, src, dst, typ, seq, sess, txn, plen = _HEADER.unpack_from(data)
-        if magic != MAGIC:
+        hdr_magic, ver, src, dst, typ, seq, sess, txn, plen = _HEADER.unpack_from(data)
+        if hdr_magic != magic:
             raise ProtocolError("bad_magic")
         if ver != PROTOCOL_VERSION:
             raise ProtocolError("bad_version")
@@ -415,7 +459,7 @@ class Packet:
             raise ProtocolError("bad_type")
         if plen > MAX_PAYLOAD or HEADER_SIZE + plen != len(data):
             raise ProtocolError("bad_length")
-        return cls(src, dst, typ, seq, sess, txn, bytes(data[HEADER_SIZE:]), magic, ver)
+        return cls(src, dst, typ, seq, sess, txn, bytes(data[HEADER_SIZE:]), hdr_magic, ver)
 
 
 def encode_command_payload(name: str, params: dict | None = None) -> bytes:
@@ -435,6 +479,8 @@ def encode_command_payload(name: str, params: dict | None = None) -> bytes:
         return struct.pack("<BBH", code, p["relay_id"], p["duration_ms"])
     if code == CommandCode.RELAY_OFF:
         return struct.pack("<BB", code, p["relay_id"])
+    if code == CommandCode.SET_MIST:
+        return struct.pack("<BBH", code, MistPattern[p["pattern"]], p["duration_s"])
     return bytes([code])
 
 
@@ -453,6 +499,8 @@ def encode_event_payload(code: EventCode, **f: int) -> bytes:
         return struct.pack("<BIB", code, f.get("command_id", 0), f.get("reason", 0))
     if code == EventCode.RELAY_DONE:
         return struct.pack("<BBHB", code, f.get("relay_id", 0), f.get("on_ms", 0), f.get("reason", 0))
+    if code == EventCode.MIST_DONE:
+        return struct.pack("<BHB", code, f.get("on_s", 0), f.get("reason", 0))
     if code == EventCode.DEVICE_ERROR:
         return struct.pack("<BBB", code, f.get("code", 0), f.get("detail", 0))
     raise ProtocolError(f"unknown event {code}")

@@ -1,12 +1,18 @@
-// UFO Device Hub (M5ATOM): USB Serial JSON Lines <-> ESP-NOW.
+// UFO Device Hub (M5AtomS3R; an ATOM Lite works too): USB Serial JSON Lines <-> ESP-NOW.
 // No game logic here: routing, reliability, session and link supervision only.
 #include <Arduino.h>
-#include <FastLED.h>
 #include <esp_random.h>
+#ifndef UFO_HUB_DISPLAY
+#define UFO_HUB_DISPLAY 0
+#endif
+#if !UFO_HUB_DISPLAY
+#include <FastLED.h>
+#endif
 
 #include "device_ids.h"
 #include "espnow_transport.h"
 #include "hub_core.h"
+#include "hub_display.h"
 #include "json_bridge.h"
 #include "ufo_config.h"
 #include "version.h"
@@ -37,6 +43,8 @@ HubInfo makeInfo() {
   g_radio.selfMac(info.mac);
   info.fw = UFO_FW_VERSION_STR;
   info.channel = wifiChannel();
+  info.system_id = systemId();
+  info.system_check = systemSeparationText(systemSeparationIssues());
   info.example_keys = usingExampleKeys();
   info.example_devices = usingExampleDevices();
   info.example_hardware = UFO_USING_EXAMPLE_HARDWARE != 0;
@@ -45,6 +53,7 @@ HubInfo makeInfo() {
 
 HubConfig makeConfig() {
   HubConfig c;
+  c.system_id = systemId();
   c.command_policy.ack_timeout_ms = UFO_ACK_TIMEOUT_MS;
   c.command_policy.max_retries = UFO_MAX_RETRIES;
   c.heartbeat_interval_ms = UFO_HEARTBEAT_INTERVAL_MS;
@@ -61,7 +70,11 @@ char g_line[UFO_SERIAL_MAX_LINE + 1];
 size_t g_line_len = 0;
 bool g_discarding = false;
 
+bool g_radio_ok = false;
+uint8_t g_sep_issues = 0;
+#if !UFO_HUB_DISPLAY
 CRGB g_led[1];
+#endif
 
 void diagTransport(JsonObject t, void*) {
   const TransportStats& s = g_radio.stats();
@@ -107,8 +120,26 @@ void updateLed(uint32_t now) {
   if (now - last < 100) return;
   last = now;
   size_t online = 0;
+  uint8_t mask = 0;
   for (size_t i = 0; i < g_core->childCount(); ++i)
-    if (g_core->childAt(i).link.up()) ++online;
+    if (g_core->childAt(i).link.up()) {
+      ++online;
+      mask |= static_cast<uint8_t>(1u << i);
+    }
+#if UFO_HUB_DISPLAY
+  (void)online;
+  HubScreen sc;
+  sc.system_id = systemId();
+  sc.channel = wifiChannel();
+  sc.radio_ok = g_radio_ok;
+  sc.pc_session = g_core->session() != 0;
+  sc.online_mask = mask;
+  sc.child_count = static_cast<uint8_t>(g_core->childCount());
+  sc.example_keys = usingExampleKeys();
+  sc.problem = g_sep_issues ? systemSeparationText(g_sep_issues) : nullptr;
+  hubDisplayShow(sc);
+#else
+  (void)mask;
   CRGB c;
   if (g_core->session() == 0)
     c = CRGB(0, 0, 40);  // blue: waiting for the PC
@@ -116,9 +147,11 @@ void updateLed(uint32_t now) {
     c = CRGB(0, 40, 0);  // green: session + all devices online
   else
     c = ((now / 250) % 2) ? CRGB(40, 25, 0) : CRGB::Black;  // blinking amber: device(s) offline
-  if (usingExampleKeys() && (now / 1000) % 5 == 0) c = CRGB(40, 0, 0);  // red pulse: example keys
+  if ((usingExampleKeys() || g_sep_issues) && (now / 1000) % 5 == 0) c = CRGB(40, 0, 0);  // red pulse
+  if (!g_radio_ok) c = ((now / 200) % 2) ? CRGB(60, 0, 0) : CRGB::Black;
   g_led[0] = c;
   FastLED.show();
+#endif
 }
 
 }  // namespace
@@ -127,12 +160,21 @@ void setup() {
   Serial.setRxBufferSize(2048);
   Serial.setTxBufferSize(4096);
   Serial.begin(HUB_SERIAL_BAUD);
+#if UFO_HUB_DISPLAY
+  hubDisplayBegin();
+#else
   FastLED.addLeds<SK6812, HUB_STATUS_LED_PIN, GRB>(g_led, 1);
   FastLED.setBrightness(80);
   g_led[0] = CRGB(40, 0, 40);
   FastLED.show();
+#endif
 
-  bool radio_ok = g_radio.begin(wifiChannel(), primaryMasterKey());
+  // Two systems in one venue: refuse to go on the air with a provisioning that
+  // would let them interfere (shared MAC / keys, invalid channel).
+  g_sep_issues = systemSeparationIssues();
+  bool radio_ok = false;
+  if (!(g_sep_issues & kSepErrors)) radio_ok = g_radio.begin(wifiChannel(), primaryMasterKey());
+  g_radio_ok = radio_ok;
   static HubInfo info = makeInfo();
   static HubJsonBridge bridge(g_out, g_radio_out, info);
   static HubCore core(bridge, makeConfig());
@@ -142,7 +184,16 @@ void setup() {
   g_core = &core;
 
   bridge.emitBoot();
-  if (!radio_ok) bridge.log("error", "ESP-NOW init failed");
+  if (g_sep_issues & kSepErrors) {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "system config error: %s - radio NOT started", systemSeparationText(g_sep_issues));
+    bridge.log("error", msg);
+  } else if (g_sep_issues) {
+    char msg[96];
+    snprintf(msg, sizeof(msg), "system config warning: %s", systemSeparationText(g_sep_issues));
+    bridge.log("warn", msg);
+  }
+  if (!radio_ok) bridge.log("error", "ESP-NOW not running");
   if (usingExampleKeys()) bridge.log("warn", "EXAMPLE ESP-NOW KEYS IN USE - run tests/tools/gen_secrets.py");
   if (usingExampleDevices()) bridge.log("warn", "config/devices.h missing - example MAC table in use");
 
@@ -152,7 +203,7 @@ void setup() {
   for (size_t i = 0; i < deviceCount(); ++i) {
     const DeviceEntry& d = deviceAt(i);
     if (d.id == kHubId) continue;
-    if (!g_radio.addPeer(d.mac, d.lmk)) {
+    if (radio_ok && !g_radio.addPeer(d.mac, d.lmk)) {
       char msg[64];
       snprintf(msg, sizeof(msg), "peer registration failed: %s", d.name);
       bridge.log("error", msg);

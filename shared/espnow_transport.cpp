@@ -2,6 +2,8 @@
 
 #include "espnow_transport.h"
 
+#include <esp_system.h>
+
 #include <Arduino.h>
 #include <WiFi.h>
 #include <esp_idf_version.h>
@@ -126,7 +128,8 @@ bool EspNowTransport::poll(RxFrame& out) {
   return xQueueReceive(static_cast<QueueHandle_t>(queue_), &out, 0) == pdTRUE;
 }
 
-void EspNowTransport::selfMac(uint8_t out[6]) const { esp_wifi_get_mac(WIFI_IF_STA, out); }
+// Factory STA MAC from efuse: valid even when the radio was not started.
+void EspNowTransport::selfMac(uint8_t out[6]) const { esp_read_mac(out, ESP_MAC_WIFI_STA); }
 
 }  // namespace ufo
 

@@ -5,12 +5,14 @@
 ```
                   PC / UFO Game  (pc/device_gateway.py)
                        |  USB Serial, JSON Lines, セッション/ACK/EVENT_ACK
-                 M5ATOM Hub  (firmware/hub)
-                       |  ESP-NOW 暗号化ユニキャスト, 固定チャネル
+                 Hub (M5AtomS3R)  (firmware/hub)
+                       |  ESP-NOW 暗号化ユニキャスト, 固定チャネル, システム別 magic
           +------------+------------+
    Illumination     M5Dial #1    M5Dial #2      (firmware/illumination, firmware/m5dial)
-   LED / Relay      SG90 / SW    SG90 / SW
+   WS2811/COB/Mist  SG90 / SW    SG90 / SW
 ```
+
+同じ会場に、この構成がもう 1 セット（システム 2）ある。分離の仕組みは [multi-system.md](multi-system.md) を参照。
 
 責務の分離:
 
@@ -34,8 +36,8 @@ shared/                   # 全ファームウェア共通（PlatformIO ライ�
   espnow_transport.*      # ESP-NOW（Arduino のみ）
   node_runtime.*          # 子機の Arduino グルー（Arduino のみ）
   led_effects.*           # NeoGacha から移植した非ブロッキング LED 演出（Arduino のみ）
-firmware/hub/             # hub_core.*（純 C++）, json_bridge.*（ArduinoJson）, main.cpp
-firmware/illumination/    # lighting.*, relay.*, illumination_controller.*（純 C++）, led_renderer.*, main.cpp
+firmware/hub/             # hub_core.*（純 C++）, json_bridge.*（ArduinoJson）, hub_display.*（AtomS3R 画面）, main.cpp
+firmware/illumination/    # lighting.*, relay.*, mist.*, illumination_controller.*（純 C++）, led_renderer.*（WS2811 + COB）, main.cpp
 firmware/m5dial/          # ball_receiver.*, dispenser.*, dial_controller.*（純 C++）, display.*, main.cpp
 pc/                       # protocol.py, device_gateway.py, mock_hub.py
 ```
@@ -55,9 +57,11 @@ pc/                       # protocol.py, device_gateway.py, mock_hub.py
 ### Illumination
 
 ```
-loop: NodeRuntime.loop() → IlluminationController.tick()（リレー時間判定）→ LedRenderer.render()（≤60fps）→ 状態LED
+loop: NodeRuntime.loop() → ボタン → IlluminationController.tick()（リレー・ミストの時間判定）→ ミスト WDT 更新 → LedRenderer.render()（≤60fps, WS2811 + COB）→ 状態LED
 ```
-* リレー制御と LED 描画は別モジュール。リレーは描画より先に判定。
+* リレー・ミストの制御と LED 描画は別モジュール。出力の ON/OFF は描画より先に判定する。
+* ミスト（`MistController`）はパターン（連続 / BREATH / PUFF）と最大実行時間を持つ。蒸気リレー（`RelayController`、短パルス）とは別の出力。
+* 本体ボタンは PC セッションがないときだけローカルのシーンを切り替える（`IlluminationController::onButtonShort/Long`）。
 * さらに `esp_timer` のワンショット（最大 ON 時間 + 100 ms）で **loop と独立に** 強制 OFF する二重化。
 
 ### M5Dial
@@ -79,14 +83,16 @@ loop: シリアル読取（行組立て, 512B 上限）→ JsonBridge → HubCor
 
 | 機器 | 色 | 意味 |
 |---|---|---|
-| Hub | 青 | PC セッションなし |
-| Hub | 緑 | セッションあり・全子機オンライン |
-| Hub | 橙点滅 | オフラインの子機あり |
+| Hub（AtomS3R） | 画面 | システム番号（帯の色 S1 = シアン / S2 = オレンジ）、チャネル、PC セッション、子機ごとのオンライン状態、設定エラー（赤帯） |
+| Hub（ATOM Lite） | 青 / 緑 / 橙点滅 | PC セッションなし / 全子機オンライン / オフラインの子機あり |
 | Hub / 子機 | 赤パルス・赤点滅 | サンプル鍵使用 / 無線初期化失敗・MAC 不一致 |
 | Illumination | 赤点滅 / 青 / 緑 / 橙 | Hub 通信断 / セッションなし / 正常 / リレー ON |
+| Illumination | 白 / 水色 | ローカル操作中（ミスト OFF / ON） |
+| Illumination | 一瞬 青 / 緑 / 赤 / 紫 | ボタン: シーン切替 / ミスト ON / ミスト OFF / 無視（PC 制御中） |
 
 ## セキュリティモデル
 
+* 同じ会場の 2 システムは、チャネル・MAC 表・鍵・パケット magic・PC 側の system_id で分離する（[multi-system.md](multi-system.md)）。
 * 静的プロビジョニングのみ。未登録デバイスの自動ペアリングはしない。子機は Hub だけ、Hub は 3 台だけを Peer 登録する。
 * Peer はすべて暗号化（PMK + リンクごとの LMK）。ブロードキャスト Peer は登録しない。
 * 受信は「登録 MAC か（コールバック）」→「フレーム検証」→「source_id が MAC の登録 ID と一致」→「destination が自分」の順に検査。

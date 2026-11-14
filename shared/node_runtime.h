@@ -22,6 +22,7 @@ class NodeRuntime : public NodeTransport {
 
   bool macMismatch() const { return mac_mismatch_; }
   bool radioOk() const { return radio_ok_; }
+  uint8_t separationIssues() const { return sep_issues_; }  // kSep* bits
   const uint8_t* selfMac() const { return self_mac_; }
   const char* selfMacStr() const { return self_mac_str_; }
   const EspNowTransport& transport() const { return radio_; }
@@ -38,6 +39,7 @@ class NodeRuntime : public NodeTransport {
   char self_mac_str_[18] = {0};
   bool mac_mismatch_ = false;
   bool radio_ok_ = false;
+  uint8_t sep_issues_ = 0;
 };
 
 }  // namespace ufo

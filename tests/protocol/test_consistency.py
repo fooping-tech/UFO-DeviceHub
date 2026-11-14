@@ -24,6 +24,8 @@ MAPPING = {
     "DeviceType": P.DeviceType,
     "OperationMode": P.OperationMode,
     "LightMode": P.LightMode,
+    "MistPattern": P.MistPattern,
+    "MistStatusFlag": P.MistStatusFlag,
     "EffectId": P.EffectId,
     "DialState": P.DialState,
     "IlluminationState": P.IlluminationState,
@@ -71,6 +73,7 @@ def test_enum_values_match(cpp_name):
 def test_constants_match():
     proto = (ROOT / "shared/protocol.h").read_text()
     assert f"kMagic = 0x{P.MAGIC:04X}" in proto
+    assert f"kMaxSystemId = {P.MAX_SYSTEM_ID};" in proto
     assert f"kHeaderSize = {P.HEADER_SIZE};" in proto
     assert f"kMaxPacketSize = {P.MAX_PACKET_SIZE};" in proto
     link = (ROOT / "shared/link_config.h").read_text()

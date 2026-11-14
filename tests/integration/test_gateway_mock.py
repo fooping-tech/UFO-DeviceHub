@@ -309,3 +309,40 @@ def test_reconnect_when_port_appears_later():
     gw.disconnect()
     hub.stop()
     assert queue  # keep import used
+
+
+def test_mist_pattern_status_and_done_event(rig):
+    hub, gw, col = rig
+    r = gw.set_mist("BREATH", duration_s=1)
+    assert r.ok and not r.clamped
+    st = gw.get_status(ILL)
+    assert st["mist_pattern"] == "BREATH" and st["mist_on"] and st["state"] == "MIST_ACTIVE"
+    ev = col.wait("MIST_DONE", timeout=3.0)[0]
+    assert ev.data["reason"] == 0  # COMPLETED
+    assert gw.set_mist("CONTINUOUS", duration_s=9999).clamped
+    assert gw.mist_off().ok
+    assert col.wait("MIST_DONE", n=2)[1].data["reason"] == 1  # OFF_COMMAND
+    assert gw.set_light_mode("AURORA").ok
+    with pytest.raises(ProtocolError):
+        gw.set_mist("FOG")
+
+
+def test_gateway_refuses_hub_of_another_system():
+    hub = MockHub(MockConfig(system_id=2, channel=11))
+    gw = DeviceGateway(transport=hub, heartbeat_interval=0.1, hub_timeout=0.5, reconnect_interval=0.05,
+                       system_id=1)
+    try:
+        assert not gw.connect(timeout=0.8)  # never attaches to system 2's hub
+        assert hub.session == 0
+    finally:
+        gw.disconnect()
+        hub.stop()
+    hub = MockHub(MockConfig(system_id=2, channel=11))
+    gw = DeviceGateway(transport=hub, heartbeat_interval=0.1, hub_timeout=0.5, reconnect_interval=0.05,
+                       system_id=2)
+    try:
+        assert gw.connect(timeout=2.0)
+        assert gw.hub_info["system_id"] == 2 and gw.hub_info["channel"] == 11
+    finally:
+        gw.disconnect()
+        hub.stop()
