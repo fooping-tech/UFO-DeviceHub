@@ -69,8 +69,19 @@
 #define UFO_USING_EXAMPLE_KEYS UFO_S2_EXAMPLE_KEYS
 #endif
 
-#if defined(UFO_REQUIRE_SECRETS) && UFO_USING_EXAMPLE_KEYS
-#error "config/secrets.h has no keys for this UFO_SYSTEM_ID. Run: python3 tests/tools/gen_secrets.py"
+// A firmware built from the example MACs/keys cannot talk to the real hub
+// (it was flashed from a PC without config/devices.h + secrets.h: the device
+// stays OFFLINE). So that is a build error unless explicitly allowed, e.g. for a
+// compile-only check on a fresh clone:
+//   PLATFORMIO_BUILD_FLAGS=-DUFO_ALLOW_EXAMPLE_CONFIG pio run
+// (UFO_REQUIRE_SECRETS, the old opt-in switch, is now the default.)
+#if !defined(UFO_ALLOW_EXAMPLE_CONFIG)
+#if UFO_USING_EXAMPLE_DEVICES
+#error "config/devices.h has no MAC table for this UFO_SYSTEM_ID. Copy config/devices.h from the PC that set up this system (see README: building on another PC)."
+#endif
+#if UFO_USING_EXAMPLE_KEYS
+#error "config/secrets.h has no ESP-NOW keys for this UFO_SYSTEM_ID. Copy config/secrets.h from the PC that set up this system (see README: building on another PC). New system: python3 tests/tools/gen_secrets.py"
+#endif
 #endif
 
 // ---- hardware ----

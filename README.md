@@ -55,12 +55,37 @@ cp config/hardware.example.h config/hardware.h    # ピン・リレー極性・�
 python3 tests/tools/gen_secrets.py                # config/secrets.h（システムごとの ESP-NOW 鍵。足りない分だけ追記）
 ```
 
-`config/devices.h`, `hardware.h`, `secrets.h` は git 管理外。ない場合はサンプル値でビルドされ、機器が `example_keys` / `example_devices` を報告する。
+`config/devices.h`, `hardware.h`, `secrets.h` は git 管理外（鍵を GitHub に載せないため）。
+**`devices.h` と `secrets.h` がないと、そのシステムのファームウェアはビルドエラーになる。**
+サンプルの MAC・鍵で書き込んだ機器は Hub と通信できず、ずっと offline になるので、ビルドの時点で止めている。
+`hardware.h` はなくてもよい（サンプルのピン配置が使われる）。
+
+### 別の PC でビルド・書込みするとき（必ずやること）
+
+`git clone` しただけの PC には `config/devices.h` と `config/secrets.h` がない。次の手順で用意する。
+
+1. **セットアップ済みの PC から 2 ファイルをコピーする**: `config/devices.h` と `config/secrets.h` を、相手 PC の同じ場所（`config/`）に置く。
+   * `secrets.h` は暗号鍵。**git に commit しない。GitHub・チャット・メールに貼らない。** USB メモリ や AirDrop など手渡しで渡す。
+   * **`gen_secrets.py` を別の PC で実行し直さない。** 別の鍵ができてしまい、その PC で書き込んだ機器は既存の Hub と通信できない。
+   * 1 つのファイルに両システム分が入っているので、2 会場とも同じファイルでよい。
+2. **ハードウェア設定を使っている場合は `config/hardware.h` も同じくコピーする**（ピン・極性・角度を変えている場合）。
+3. **書き込んだら起動ログを確認する**: `pio device monitor -b 115200` で、次の警告が**出ていない**こと。
+   * `WARNING: own MAC differs from config/devices.h - the hub will ignore us`
+   * `WARNING: EXAMPLE ESP-NOW KEYS IN USE`
+4. **Hub 側でも online を確認する**: ブラウザの試験画面（`pc.web_console`）や `ufo_cli.py` で、書き込んだ機器が online になること。
+
+機器を交換した（MAC が変わった）ときは、`config/devices.h` を書き換えたうえで **その機器と Hub の両方** を書き直し、更新した `devices.h` を他の PC にも配る。
+
+ファイルがない PC でコンパイルだけ確認したい場合（書き込みには使わない）:
+
+```sh
+PLATFORMIO_BUILD_FLAGS=-DUFO_ALLOW_EXAMPLE_CONFIG pio run
+```
 
 ## ビルド・書込み
 
 ```sh
-pio run                                       # 両システム × 4 台（hub_s1 ... m5dial_2_s2）
+pio run                                       # 両システム × 4 台（hub_s1 ... m5dial_2_s2。未設定のシステムはエラー）
 pio run -e hub_s1          -t upload          # Hub (M5AtomS3R)            システム 1
 pio run -e illumination_s1 -t upload          # Illumination ATOM (0x10)  システム 1
 pio run -e m5dial_1_s1     -t upload          # M5Dial #1 (0x20)          システム 1
@@ -89,7 +114,7 @@ ATOM Lite + Atomic PWM Base + Unit 2Relay。旧 `atom_led_mist` スケッチの�
 
 ```sh
 pio test -e native                                              # ファームウェアのロジック 74 件
-uv run --no-project --with pyserial --with pytest python -m pytest    # Python 103 件（Mock 使用）
+uv run --no-project --with pyserial --with pytest python -m pytest    # Python 105 件（Mock 使用）
 ```
 
 ## PC から使う

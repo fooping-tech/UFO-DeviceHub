@@ -2,8 +2,9 @@
 //
 // !!! EXAMPLE KEYS - PUBLIC, DO NOT USE IN PRODUCTION !!!
 // Generate private keys with:   python3 tests/tools/gen_secrets.py
-// which writes config/secrets.h (git-ignored, one key set per system). Build
-// with -DUFO_REQUIRE_SECRETS to make missing keys a compile error.
+// which writes config/secrets.h (git-ignored, one key set per system). Device
+// firmware does not build without it (-DUFO_ALLOW_EXAMPLE_CONFIG overrides that
+// for compile-only checks).
 // While example keys are in use, every device reports the flag "example_keys"
 // (STATUS / GET_DIAG) and the PC library logs a warning.
 //
