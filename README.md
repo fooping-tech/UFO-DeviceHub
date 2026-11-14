@@ -114,13 +114,14 @@ gw.relay_pulse(1500)                     # 蒸気リレー（設定時のみ、�
 ### ブラウザから試験する
 
 ```sh
-python3 -m pc.web_console --system 1                       # Hub を自動検出し、ブラウザで http://127.0.0.1:8765/ を開く
+python3 -m pc.web_console --system 1                       # Hub を自動検出し、ブラウザで http://127.0.0.1:8780/ を開く
 python3 -m pc.web_console --system 1 --port /dev/cu.usbmodem114101
 python3 -m pc.web_console --port mock                      # ハードウェアなし（Mock）
 ```
 
 照明モード・演出・ミスト・蒸気リレー・M5Dial（GAME / ARM / RELEASE）の操作、各機器の STATUS、オンライン状態・RTT、診断、イベントのライブ表示、STOP ALL ができる。
-命令はゲームと同じ `DeviceGateway` を通る（セッション・ACK・再送・EVENT_ACK）。Hub のシリアルポートは 1 つのプログラムしか開けないので、ゲームや `ufo_cli.py` は止めてから使う。
+命令はゲームと同じ `DeviceGateway` を通る（セッション・ACK・再送・EVENT_ACK）。Hub のシリアルポートは 1 つのプログラムしか開けないので、Hub を使うゲームや `ufo_cli.py` は止めてから使う。
+画面のポートは 8780（`--http-port` で変更可）。8765 は UFO_game のバックエンド（WebSocket）が使うので避けている。ポートが使用中ならメッセージを出して終了する。
 既定では自分の PC（127.0.0.1）からしか開けない。他のサイトからの命令送信（CSRF・DNS リバインディング）も拒否する。
 
 手動操作・現地診断: `python3 tests/tools/ufo_cli.py --system 1 --port auto devices|diag|probe|light|effect|mist|steam|game|release|stop|monitor`

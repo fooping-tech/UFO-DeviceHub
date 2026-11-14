@@ -4,7 +4,7 @@
     python3 -m pc.web_console --system 1 --port /dev/cu.usbmodem114101
     python3 -m pc.web_console --port mock                # no hardware (pc.mock_hub)
 
-then open http://127.0.0.1:8765/ . Every button goes through the real
+then open http://127.0.0.1:8780/ . Every button goes through the real
 DeviceGateway (session, ACK, retries, EVENT_ACK), so the console tests the same
 path the game uses. It is a test tool: only one program can own the hub's serial
 port, so stop the game (or ufo_cli.py) while the console runs.
@@ -14,12 +14,17 @@ Security: the console moves real actuators (mist, servos, relay). It listens on
 the console itself (DNS rebinding) and requires a custom header on every POST,
 so other web pages open in the same browser cannot send commands.
 
+Port: 8780 by default. Do not use 8765 - the UFO game backend
+(CoreXY_UFO_Game) listens there for its WebSocket. If the port is taken the
+console stops with a message instead of starting half-way.
+
 Standard library only (http.server + Server-Sent Events).
 """
 
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import logging
 import queue
@@ -41,6 +46,11 @@ log = logging.getLogger("ufo.web")
 STATIC = Path(__file__).resolve().parent / "web"
 CSRF_HEADER = "X-UFO-Console"
 EVENT_HISTORY = 200
+DEFAULT_HTTP_PORT = 8780  # 8765 belongs to the UFO game backend (WebSocket)
+
+
+class ConsolePortInUse(OSError):
+    """The HTTP port is already used by another program."""
 
 
 def _result_dict(r: CommandResult) -> dict:
@@ -67,7 +77,7 @@ def enums() -> dict:
 
 
 class WebConsole:
-    def __init__(self, gw: DeviceGateway, host: str = "127.0.0.1", port: int = 8765) -> None:
+    def __init__(self, gw: DeviceGateway, host: str = "127.0.0.1", port: int = DEFAULT_HTTP_PORT) -> None:
         self.gw = gw
         self._clients: list[queue.Queue] = []
         self._history: deque[dict] = deque(maxlen=EVENT_HISTORY)
@@ -80,7 +90,15 @@ class WebConsole:
             pass
 
         Handler.console = console
-        self.httpd = ThreadingHTTPServer((host, port), Handler)
+        try:
+            self.httpd = ThreadingHTTPServer((host, port), Handler)
+        except OSError as e:
+            if e.errno == errno.EADDRINUSE:
+                raise ConsolePortInUse(
+                    e.errno, f"port {host}:{port} is already used by another program "
+                    f"(the UFO game backend uses 8765); choose another one with --http-port"
+                ) from e
+            raise
         self.httpd.daemon_threads = True
         self.host, self.port = self.httpd.server_address[:2]
         self._thread: threading.Thread | None = None
@@ -277,7 +295,8 @@ def main() -> int:
     ap.add_argument("--port", default="auto", help="hub serial port, 'auto' or 'mock'")
     ap.add_argument("--system", type=int, default=None, help="UFO system id (1, 2): attach only to that hub")
     ap.add_argument("--host", default="127.0.0.1", help="listen address (default: this PC only)")
-    ap.add_argument("--http-port", type=int, default=8765)
+    ap.add_argument("--http-port", type=int, default=DEFAULT_HTTP_PORT,
+                    help=f"browser port (default {DEFAULT_HTTP_PORT}; 8765 is the UFO game backend)")
     ap.add_argument("--no-browser", action="store_true")
     ap.add_argument("-v", "--verbose", action="store_true")
     a = ap.parse_args()
@@ -291,7 +310,11 @@ def main() -> int:
         gw = DeviceGateway(port=a.port, system_id=a.system)
     if a.host not in ("127.0.0.1", "localhost", "::1"):
         log.warning("listening on %s: anyone on this network can move the actuators", a.host)
-    console = WebConsole(gw, a.host, a.http_port)
+    try:
+        console = WebConsole(gw, a.host, a.http_port)  # before the hub: a busy port must not grab the serial
+    except ConsolePortInUse as e:
+        log.error("%s", e.strerror)
+        return 2
     gw.connect(wait=False)  # the page shows the connection state; reconnects automatically
     console.start()
     log.info("UFO web console: %s", console.url)

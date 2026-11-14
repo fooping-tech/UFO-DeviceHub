@@ -9,7 +9,9 @@ import pytest
 
 from pc import DeviceGateway
 from pc.mock_hub import MockConfig, MockHub
-from pc.web_console import CSRF_HEADER, WebConsole
+import socket
+
+from pc.web_console import CSRF_HEADER, DEFAULT_HTTP_PORT, ConsolePortInUse, WebConsole
 
 
 @pytest.fixture
@@ -112,3 +114,19 @@ def test_events_stream(console):
     assert got.wait(3.0), lines
     done = [e for e in lines if e["name"] == "MIST_DONE"][0]
     assert done["source"] == 16 and done["data"]["reason"] == 1
+
+
+def test_default_port_avoids_game_backend_and_busy_port_is_reported():
+    assert DEFAULT_HTTP_PORT != 8765  # UFO game backend WebSocket
+    hub = MockHub(MockConfig())
+    gw = DeviceGateway(transport=hub)
+    blocker = socket.socket()
+    blocker.bind(("127.0.0.1", 0))
+    blocker.listen(1)
+    try:
+        with pytest.raises(ConsolePortInUse, match="already used"):
+            WebConsole(gw, "127.0.0.1", blocker.getsockname()[1])
+        assert not gw.connected  # the serial side was never touched
+    finally:
+        blocker.close()
+        hub.stop()
