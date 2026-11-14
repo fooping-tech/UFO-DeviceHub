@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UFO Device Console</title>
+<style>
+:root {
+  --bg: #f4f5f7; --panel: #ffffff; --ink: #1d2330; --muted: #677085; --line: #dfe3ea;
+  --accent: #2563eb; --ok: #15803d; --ok-bg: #e7f6ec; --warn: #b45309; --warn-bg: #fdf3e2;
+  --bad: #c62828; --bad-bg: #fdecec; --s1: #06b6d4; --s2: #f97316; --chip: #eef1f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #12151c; --panel: #1b2029; --ink: #e6e9ef; --muted: #96a0b3; --line: #2c3340;
+    --accent: #60a5fa; --ok: #4ade80; --ok-bg: #16301f; --warn: #fbbf24; --warn-bg: #33290f;
+    --bad: #f87171; --bad-bg: #3a1717; --chip: #252b36;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Segoe UI", sans-serif; }
+header { position: sticky; top: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  padding: 10px 16px; background: var(--panel); border-bottom: 1px solid var(--line); }
+header h1 { font-size: 16px; margin: 0 8px 0 0; }
+.badge { padding: 3px 10px; border-radius: 999px; font-weight: 700; font-size: 13px; background: var(--chip); }
+.sys1 { background: var(--s1); color: #04252c; } .sys2 { background: var(--s2); color: #2b1203; }
+.pill-ok { background: var(--ok-bg); color: var(--ok); } .pill-bad { background: var(--bad-bg); color: var(--bad); }
+.pill-warn { background: var(--warn-bg); color: var(--warn); }
+.spacer { flex: 1; }
+main { display: grid; gap: 14px; padding: 14px 16px 40px; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  max-width: 1500px; margin: 0 auto; }
+section { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px; min-width: 0; }
+section h2 { font-size: 15px; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+section h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 14px 0 6px; }
+.wide { grid-column: 1 / -1; }
+button { font: inherit; border: 1px solid var(--line); background: var(--chip); color: var(--ink); border-radius: 7px;
+  padding: 6px 10px; cursor: pointer; }
+button:hover { border-color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.danger { background: var(--bad); border-color: var(--bad); color: #fff; font-weight: 700; }
+#stopAll { padding: 8px 18px; font-size: 15px; }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 6px 0; }
+.grid-btn { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; }
+label { color: var(--muted); font-size: 12px; display: flex; align-items: center; gap: 6px; }
+input, select { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 4px 6px; }
+input[type=number] { width: 84px; } input[type=range] { width: 110px; padding: 0; }
+input[type=color] { padding: 0; width: 34px; height: 28px; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { text-align: left; padding: 5px 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+th { color: var(--muted); font-weight: 600; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); margin-right: 5px; }
+.dot.on { background: var(--ok); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; font-size: 13px; }
+.kv span:nth-child(odd) { color: var(--muted); }
+.result { font-size: 12px; margin-top: 8px; min-height: 18px; color: var(--muted); }
+.result.ok { color: var(--ok); } .result.bad { color: var(--bad); } .result.warn { color: var(--warn); }
+#log { height: 300px; overflow: auto; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+#log div { white-space: pre-wrap; word-break: break-all; }
+.ev-dev { color: var(--accent); } .ev-link { color: var(--warn); } .ev-err { color: var(--bad); } .ev-cmd { color: var(--muted); }
+pre { margin: 0; max-height: 280px; overflow: auto; font-size: 12px; background: var(--bg); border: 1px solid var(--line);
+  border-radius: 6px; padding: 8px; }
+details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 10px; }
+#banner { display: none; padding: 8px 16px; background: var(--bad-bg); color: var(--bad); font-weight: 600; }
+@media (max-width: 420px) { main { padding: 10px; grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>UFO Device Console</h1>
+  <span id="sysBadge" class="badge">SYSTEM ?</span>
+  <span id="connPill" class="badge pill-bad">未接続</span>
+  <span id="hubInfo" style="color:var(--muted);font-size:12px"></span>
+  <span class="spacer"></span>
+  <button id="stopAll" class="danger" title="全機器に STOP_ALL（ミスト・リレー OFF、演出停止、排出中断）">STOP ALL</button>
+</header>
+<div id="banner"></div>
+
+<main>
+  <section>
+    <h2>機器</h2>
+    <table>
+      <thead><tr><th>機器</th><th>状態</th><th>RTT</th><th>セッション</th><th>fw</th></tr></thead>
+      <tbody id="devRows"><tr><td colspan="5" style="color:var(--muted)">Hub 接続待ち…</td></tr></tbody>
+    </table>
+    <div class="row" style="margin-top:10px">
+      <button id="btnDiag">診断 (GET_DIAG)</button>
+    </div>
+    <details id="diagBox"><summary>診断結果</summary><pre id="diagOut">-</pre></details>
+  </section>
+
+  <section>
+    <h2>Illumination <span class="badge" id="illState">-</span></h2>
+    <h3>照明モード</h3>
+    <div class="row">
+      <select id="lmMode"></select>
+      <label>明るさ <input id="lmBright" type="range" min="0" max="255" value="160"><span id="lmBrightV">160</span></label>
+    </div>
+    <div class="row">
+      <label>速さ <input id="lmSpeed" type="range" min="0" max="255" value="128"></label>
+      <label>フェード ms <input id="lmTrans" type="number" min="0" max="65535" value="500"></label>
+      <label>色 <input id="lmColor" type="color" value="#ff8800"></label>
+      <button class="primary" id="btnLight">適用</button>
+    </div>
+    <h3>ミスト</h3>
+    <div class="row">
+      <label>時間 s <input id="mistDur" type="number" min="0" max="65535" value="60" title="0 = 機器の最大 (10 分)"></label>
+      <button data-mist="CONTINUOUS">連続</button>
+      <button data-mist="BREATH">BREATH 8s/6s</button>
+      <button data-mist="PUFF">PUFF 3s/9s</button>
+      <button data-mist="OFF" class="danger">OFF</button>
+    </div>
+    <div class="kv" id="mistKv"></div>
+    <h3>演出 (TRIGGER_EFFECT)</h3>
+    <div class="row">
+      <label>時間 ms <input id="fxDur" type="number" min="0" max="10000" value="0" title="0 = 既定"></label>
+      <label>強さ <input id="fxInt" type="range" min="0" max="255" value="255"></label>
+    </div>
+    <div class="grid-btn" id="fxBtns"></div>
+    <h3>蒸気リレー</h3>
+    <div class="row">
+      <label>ms <input id="relayMs" type="number" min="1" max="65535" value="1000"></label>
+      <button id="btnPulse">RELAY_PULSE</button>
+      <button id="btnRelayOff">RELAY_OFF</button>
+    </div>
+    <div class="result" id="illResult"></div>
+    <details><summary>STATUS (raw)</summary><pre id="illRaw">-</pre></details>
+  </section>
+
+  <section id="dial32"></section>
+  <section id="dial33"></section>
+
+  <section class="wide">
+    <h2>イベント
+      <span class="spacer"></span>
+      <label><input type="checkbox" id="logCmds" checked> 命令の結果も表示</label>
+      <button id="btnClear">クリア</button>
+    </h2>
+    <div id="log"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const ILL = 16;
+const $ = (id) => document.getElementById(id);
+let meta = null;
+let connected = false;
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {
+    method: "POST", body: JSON.stringify(body),
+    headers: { "Content-Type": "application/json", "X-UFO-Console": "1" },
+  };
+  const r = await fetch(path, opt);
+  const j = await r.json().catch(() => ({ error: "bad response" }));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+function logLine(text, cls) {
+  const box = $("log");
+  const div = document.createElement("div");
+  div.className = cls || "";
+  div.textContent = text;
+  box.prepend(div);
+  while (box.childNodes.length > 500) box.removeChild(box.lastChild);
+}
+
+function devName(id) {
+  const d = meta && meta.enums.devices.find((x) => x.id === id);
+  return d ? d.name : id == null ? "hub" : "0x" + Number(id).toString(16);
+}
+
+function showResult(el, name, r) {
+  const ok = r.result === "ACCEPTED";
+  el.className = "result " + (ok ? (r.clamped ? "warn" : "ok") : "bad");
+  el.textContent = `${name}: ${r.result}${r.clamped ? " (clamped)" : ""}${r.duplicate ? " (duplicate)" : ""}` +
+    `${r.attempts > 1 ? ` / 送信 ${r.attempts} 回` : ""}${r.reason ? ` / ${r.reason}` : ""}`;
+}
+
+async function send(device, name, params, resultEl) {
+  try {
+    const r = await api("/api/command", { device, name, params: params || {} });
+    if (resultEl) showResult(resultEl, name, r);
+    if ($("logCmds").checked)
+      logLine(`${new Date().toLocaleTimeString()}  → ${devName(device)} ${name} ${JSON.stringify(params || {})}  ${r.result}${r.clamped ? " clamped" : ""}`,
+        r.result === "ACCEPTED" ? "ev-cmd" : "ev-err");
+    setTimeout(() => refreshStatus(device), 150);
+    return r;
+  } catch (e) {
+    if (resultEl) { resultEl.className = "result bad"; resultEl.textContent = `${name}: ${e.message}`; }
+    logLine(`${new Date().toLocaleTimeString()}  → ${devName(device)} ${name}  ERROR ${e.message}`, "ev-err");
+  }
+}
+
+// ---- header / meta -------------------------------------------------------------
+async function refreshMeta() {
+  try { meta = await api("/api/meta"); } catch (e) { setConn(false, "コンソール停止"); return; }
+  const hub = meta.hub || {};
+  const sys = hub.system_id || meta.system_id;
+  const b = $("sysBadge");
+  b.textContent = sys ? `SYSTEM ${sys}` : "SYSTEM ?";
+  b.className = "badge " + (sys === 1 ? "sys1" : sys === 2 ? "sys2" : "");
+  setConn(meta.connected, meta.connected ? "接続中" : "Hub 接続待ち");
+  $("hubInfo").textContent = meta.connected
+    ? `CH ${hub.channel} · Hub ${hub.hub_mac} · fw ${hub.fw} · session ${Number(meta.session_id).toString(16)}` : "";
+  const warn = [];
+  if (hub.example_keys) warn.push("サンプル鍵で動作中（gen_secrets.py で鍵を生成してください）");
+  if (hub.system_check && hub.system_check !== "ok") warn.push(`システム設定: ${hub.system_check}`);
+  $("banner").style.display = warn.length ? "block" : "none";
+  $("banner").textContent = warn.join(" / ");
+  if (!$("lmMode").options.length) buildControls();
+}
+
+function setConn(ok, text) {
+  connected = ok;
+  const p = $("connPill");
+  p.className = "badge " + (ok ? "pill-ok" : "pill-bad");
+  p.textContent = text;
+  document.querySelectorAll("main button, #stopAll").forEach((x) => { if (x.id !== "btnClear") x.disabled = !ok; });
+}
+
+// ---- controls ------------------------------------------------------------------
+function buildControls() {
+  const sel = $("lmMode");
+  meta.enums.light_modes.forEach((m) => sel.add(new Option(m, m)));
+  sel.value = "AURORA";
+  const fx = $("fxBtns");
+  meta.enums.effects.forEach((e) => {
+    const bt = document.createElement("button");
+    bt.textContent = e;
+    bt.onclick = () => send(ILL, "TRIGGER_EFFECT",
+      { effect: e, duration_ms: +$("fxDur").value, intensity: +$("fxInt").value }, $("illResult"));
+    fx.appendChild(bt);
+  });
+  meta.enums.devices.filter((d) => d.id >= 0x20).forEach(buildDial);
+  setConn(connected, $("connPill").textContent);
+}
+
+function hexToRgb(h) { return [1, 3, 5].map((i) => parseInt(h.substr(i, 2), 16)); }
+
+$("lmBright").oninput = () => { $("lmBrightV").textContent = $("lmBright").value; };
+$("btnLight").onclick = () => send(ILL, "SET_LIGHT_MODE", {
+  mode: $("lmMode").value, brightness: +$("lmBright").value, speed: +$("lmSpeed").value,
+  transition_ms: +$("lmTrans").value, color: hexToRgb($("lmColor").value),
+}, $("illResult"));
+document.querySelectorAll("[data-mist]").forEach((bt) => {
+  bt.onclick = () => {
+    const p = bt.dataset.mist;
+    send(ILL, "SET_MIST", p === "OFF" ? { pattern: "OFF" } : { pattern: p, duration_s: +$("mistDur").value }, $("illResult"));
+  };
+});
+$("btnPulse").onclick = () => send(ILL, "RELAY_PULSE", { relay_id: 0, duration_ms: +$("relayMs").value }, $("illResult"));
+$("btnRelayOff").onclick = () => send(ILL, "RELAY_OFF", {}, $("illResult"));
+$("stopAll").onclick = async () => {
+  try {
+    const r = await api("/api/stop_all", {});
+    logLine(`${new Date().toLocaleTimeString()}  STOP_ALL  ` +
+      Object.entries(r).map(([d, x]) => `${devName(+d)}=${x.result}`).join(" "), "ev-err");
+  } catch (e) { logLine(`STOP_ALL failed: ${e.message}`, "ev-err"); }
+};
+$("btnDiag").onclick = async () => {
+  try { $("diagOut").textContent = JSON.stringify(await api("/api/diag"), null, 1); $("diagBox").open = true; }
+  catch (e) { $("diagOut").textContent = e.message; }
+};
+$("btnClear").onclick = () => { $("log").innerHTML = ""; };
+
+function buildDial(d) {
+  const s = $("dial" + d.id);
+  if (!s) return;
+  s.innerHTML = `
+    <h2>${d.name} <span class="badge" id="dState${d.id}">-</span></h2>
+    <div class="row">
+      <button data-a="GAME">GAME モード</button><button data-a="STANDBY">STANDBY</button>
+    </div>
+    <div class="row">
+      <button data-a="ARM_RECEIVER" class="primary">受取待ち (ARM)</button>
+      <button data-a="DISARM_RECEIVER">解除 (DISARM)</button>
+      <button data-a="RELEASE_BALL">排出 (RELEASE)</button>
+    </div>
+    <div class="kv" id="dKv${d.id}"></div>
+    <div class="result" id="dRes${d.id}"></div>
+    <details><summary>STATUS (raw)</summary><pre id="dRaw${d.id}">-</pre></details>`;
+  s.querySelectorAll("[data-a]").forEach((bt) => {
+    bt.onclick = () => {
+      const a = bt.dataset.a;
+      if (a === "GAME" || a === "STANDBY") send(d.id, "SET_MODE", { mode: a }, $("dRes" + d.id));
+      else send(d.id, a, {}, $("dRes" + d.id));
+    };
+  });
+}
+
+// ---- status polling ------------------------------------------------------------
+const online = {};
+async function refreshDevices() {
+  if (!connected) return;
+  try {
+    const { devices } = await api("/api/devices");
+    $("devRows").innerHTML = devices.map((d) => `
+      <tr><td><span class="dot ${d.online ? "on" : ""}"></span>${d.name}</td>
+      <td>${d.online ? d.state || "-" : "offline"}</td>
+      <td>${d.online && d.rtt_ms != null ? d.rtt_ms + " ms" : "-"}</td>
+      <td>${d.online ? (d.session_ok ? "ok" : "同期中") : "-"}</td>
+      <td>${d.fw || "-"}</td></tr>`).join("");
+    devices.forEach((d) => { online[d.id] = d.online; });
+  } catch (e) { /* hub reconnecting */ }
+}
+
+function kv(el, pairs) {
+  el.innerHTML = pairs.map(([k, v]) => `<span>${k}</span><span>${v}</span>`).join("");
+}
+
+async function refreshStatus(id) {
+  if (!connected || !online[id]) return;
+  try {
+    const st = await api(`/api/status?device=${id}`);
+    if (id === ILL) {
+      $("illState").textContent = st.state;
+      kv($("mistKv"), [
+        ["パターン", st.mist_pattern], ["出力", st.mist_on ? "ON" : "OFF"],
+        ["残り", st.mist_pattern !== "OFF" ? st.mist_remaining_s + " s" : "-"], ["ON 時間", st.mist_on_s + " s"],
+        ["照明", `${st.light_mode} / ${st.brightness}`], ["ローカル操作", st.local_mode ? "中" : "-"],
+      ]);
+      $("illRaw").textContent = JSON.stringify(st, null, 1);
+    } else {
+      const el = $("dState" + id);
+      if (!el) return;
+      el.textContent = st.dial_state;
+      kv($("dKv" + id), [["モード", st.op_mode], ["サイクル", st.cycle], ["受取スイッチ", st.switch_on ? "ON" : "OFF"],
+        ["サーボ", st.servo_deg + "°"], ["排出回数", st.releases]]);
+      $("dRaw" + id).textContent = JSON.stringify(st, null, 1);
+    }
+  } catch (e) { /* offline / timeout: shown in the device table */ }
+}
+
+// ---- events (Server-Sent Events) -----------------------------------------------
+function startEvents() {
+  const es = new EventSource("/api/events");
+  es.onmessage = (m) => {
+    const e = JSON.parse(m.data);
+    const link = ["DEVICE_ONLINE", "DEVICE_OFFLINE", "DEVICE_REBOOTED", "GATEWAY_CONNECTED",
+      "GATEWAY_DISCONNECTED", "SESSION_CLOSED"].includes(e.name);
+    const err = e.name === "ERROR" || e.name === "HUB_ERROR" || e.name === "DEVICE_OFFLINE";
+    const data = e.data && Object.keys(e.data).length ? " " + JSON.stringify(e.data) : "";
+    logLine(`${e.time}  ${e.name}  ${e.source != null ? devName(e.source) : ""}${data}`,
+      err ? "ev-err" : link ? "ev-link" : "ev-dev");
+    if (link) refreshMeta();
+    if (e.source != null) refreshStatus(e.source);
+  };
+  es.onerror = () => setConn(false, "コンソール再接続中");
+  es.onopen = () => refreshMeta();
+}
+
+refreshMeta();
+startEvents();
+setInterval(refreshMeta, 3000);
+setInterval(refreshDevices, 2000);
+setInterval(() => { if (!document.hidden) [ILL, 0x20, 0x21].forEach(refreshStatus); }, 2000);
+</script>
+</body>
+</html>

@@ -35,7 +35,7 @@ void LightingController::begin(LightMode initial, uint32_t now) {
 
 CommandOutcome LightingController::setMode(const SetLightModeParams& p, uint32_t now) {
   CommandOutcome o;
-  if (p.mode > static_cast<uint8_t>(LightMode::Custom)) {
+  if (p.mode > static_cast<uint8_t>(LightMode::Night)) {
     o.result = AckResult::InvalidParams;
     return o;
   }

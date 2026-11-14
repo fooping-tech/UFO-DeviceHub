@@ -92,6 +92,36 @@ void test_bad_magic_version_length() {
   TEST_ASSERT_EQUAL(3, f.core->counters().rx_bad_frame);
 }
 
+// Two UFO systems in one venue: a device of system 2 must ignore every frame
+// of system 1 even when MAC table and keys were (wrongly) shared.
+void test_other_system_frames_rejected() {
+  App app;
+  FakeNodeTransport tx;
+  NodeConfig cfg;
+  cfg.system_id = 2;
+  cfg.self_id = kSelf;
+  cfg.device_type = DeviceType::Dial;
+  memcpy(cfg.hub_mac, hubMac(), 6);
+  NodeCore core(cfg, tx, app);
+  core.begin(0, 1, 2);
+  auto sys1 = simpleCommand(kSelf, 0, 10, CommandCode::StopAll);  // system 1 magic
+  core.onFrame(hubMac(), sys1.data(), sys1.size(), 0, 0);
+  auto hb1 = hubHeartbeat(kSelf, 0, 1);
+  core.onFrame(hubMac(), hb1.data(), hb1.size(), 0, 0);
+  TEST_ASSERT_EQUAL(0, app.executed);
+  TEST_ASSERT_EQUAL(2, core.counters().rx_bad_frame);
+  TEST_ASSERT_FALSE(core.hubLinkUp());  // foreign frames never keep the link alive
+  TEST_ASSERT_EQUAL(0, tx.frames.size());
+  // the same frame with the system 2 magic is accepted and answered with it
+  auto sys2 = sys1;
+  sys2[0] = static_cast<uint8_t>(systemMagic(2) & 0xFF);
+  sys2[1] = static_cast<uint8_t>(systemMagic(2) >> 8);
+  core.onFrame(hubMac(), sys2.data(), sys2.size(), 0, 0);
+  TEST_ASSERT_EQUAL(1, app.executed);
+  TEST_ASSERT_EQUAL(1, tx.frames.size());
+  TEST_ASSERT_EQUAL_HEX16(0x5547, tx.frames[0].bytes[0] | (tx.frames[0].bytes[1] << 8));
+}
+
 void test_physical_command_requires_session() {
   Fixture f;
   f.feed(simpleCommand(kSelf, 0, 10, CommandCode::ArmReceiver));
@@ -229,6 +259,7 @@ int main() {
   UNITY_BEGIN();
   RUN_TEST(test_rejects_unknown_mac_and_broadcast_and_wrong_ids);
   RUN_TEST(test_bad_magic_version_length);
+  RUN_TEST(test_other_system_frames_rejected);
   RUN_TEST(test_physical_command_requires_session);
   RUN_TEST(test_session_begin_and_old_session_rejected);
   RUN_TEST(test_duplicate_command_not_executed_twice);

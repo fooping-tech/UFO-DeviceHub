@@ -128,7 +128,12 @@ struct Illum {
   RelayLog gpio;
   bool configured[1] = {true};
   RelayController relay{gpio, 1, configured, 3000, 2000};
-  IlluminationController app{relay, LightMode::Idle};
+  struct MistLog : MistOutput {
+    bool on = false;
+    void setMist(bool v) override { on = v; }
+  } mist_gpio;
+  MistController mist{mist_gpio, true, 600000};
+  IlluminationController app{relay, mist, LightMode::Idle};
   DevRadio radio;
   NodeCore core;
   bool powered = true;

@@ -3,53 +3,87 @@
 設定は `config/` に置く。`*.example.h` をコピーして編集する（実ファイルは git 管理外）。
 
 ```
-cp config/devices.example.h  config/devices.h    # MAC アドレス
+cp config/devices.example.h  config/devices.h    # 両システムの MAC とチャネル
 cp config/hardware.example.h config/hardware.h   # ピン・角度・時間
-python3 tests/tools/gen_secrets.py               # config/secrets.h（PMK/LMK 乱数生成）
+python3 tests/tools/gen_secrets.py               # config/secrets.h（システムごとの PMK/LMK を乱数生成）
 ```
 
-実ファイルがない場合はサンプルでビルドされ、機器は `example_keys` / `example_devices` を報告する（Hub の状態 LED が 5 秒ごとに赤、`HELLO_ACK` / `DIAG` / ゲートウェイのログ警告）。
+実ファイルがない場合はサンプルでビルドされ、機器は `example_keys` / `example_devices` を報告する（Hub の画面下部に赤帯（ATOM Lite の Hub では状態 LED が 5 秒ごとに赤）、`HELLO_ACK` / `DIAG` / ゲートウェイのログ警告）。
 `-DUFO_REQUIRE_SECRETS` を付けると `secrets.h` がない場合にビルドエラーにできる。
 
 ## 共通
 
 | 項目 | 設定 | 備考 |
 |---|---|---|
-| Wi-Fi チャネル | `UFO_WIFI_CHANNEL`（`devices.h`） | **全機器で同じ値**。AP には接続しない |
-| MAC | `UFO_MAC_*`（`devices.h`） | 各ファームは起動時にシリアルへ `MAC=..` を出す（Hub は `BOOT` 行の `hub_mac`） |
-| 鍵 | `UFO_PMK`, `UFO_LMK_*`（`secrets.h`） | 鍵を変えたら 4 台とも書き直す |
+| システム | `UFO_SYSTEM_ID`（PlatformIO env の `_s1` / `_s2`） | 同じ会場の 2 システムを区別する。[multi-system.md](multi-system.md) |
+| Wi-Fi チャネル | `UFO_S1_WIFI_CHANNEL` / `UFO_S2_WIFI_CHANNEL`（`devices.h`） | **同じシステムの全機器で同じ値**。システム間は 5 ch 以上離す（既定 1 / 11）。AP には接続しない |
+| MAC | `UFO_S1_MAC_*` / `UFO_S2_MAC_*`（`devices.h`） | 各ファームは起動時にシリアルへ `UFO system=N ... MAC=..` を出す（Hub は `BOOT` 行の `hub_mac`） |
+| 鍵 | `UFO_S1_PMK`, `UFO_S1_LMK_*` / `UFO_S2_*`（`secrets.h`） | システムごとに別の鍵にする。鍵を変えたら、そのシステムの 4 台をすべて書き直す |
 
-`devices.example.h` の M5Dial の MAC は NeoGacha の `setGachaId()` にあった値（`C0:4E:30:12:6B:90` / `C0:4E:30:12:67:D4`）。同じ実機を使う場合のみ有効。Hub と Illumination はプレースホルダ。
+`devices.example.h` のシステム 1 の M5Dial の MAC は NeoGacha の `setGachaId()` にあった値（`C0:4E:30:12:6B:90` / `C0:4E:30:12:67:D4`）。同じ実機を使う場合にのみ有効で、それ以外はプレースホルダ。
+旧形式（`UFO_WIFI_CHANNEL`, `UFO_MAC_*`, `UFO_PMK`, `UFO_LMK_*`）の設定はシステム 1 として読む。
 
-## Hub（M5ATOM Lite）
+## Hub（M5AtomS3R）
 
 | 項目 | 値 |
 |---|---|
-| ボード | `m5stack-atom` |
-| USB Serial | 115200 bps（`HUB_SERIAL_BAUD`） |
-| 状態 LED | G27 内蔵 SK6812 |
+| ボード | `m5stack-atoms3`（ESP32-S3、env `hub_s1` / `hub_s2`） |
+| USB | ネイティブ USB CDC（`ARDUINO_USB_CDC_ON_BOOT=1`）。macOS では `/dev/cu.usbmodem*` |
+| 画面 | 上部の帯にシステム番号（S1 = シアン、S2 = オレンジ）、チャネル、無線状態、PC セッション、子機ごとのオンライン状態。設定エラー・サンプル鍵は下部の赤帯 |
+
+ATOM Lite を Hub にする場合は env `hub_atomlite_s1` / `hub_atomlite_s2`（USB-UART、状態 LED G27: 青 = PC 待ち、緑 = 全台オンライン、黄点滅 = 子機オフライン、赤点滅 = 無線停止）。
 
 ## Illumination ATOM（Device ID 0x10）
 
-| 項目 | 設定 | 初期値 | 状態 |
+ATOM Lite + Atomic PWM Base + Unit 2Relay。旧 `atom_led_mist` スケッチの配線と演出をそのまま引き継ぐ。
+
+| 項目 | 設定 | 初期値 | 備考 |
 |---|---|---|---|
-| LED テープ データ | `ILLUM_LED_PIN` | 26（Grove） | **未確認** |
-| LED 数 | `ILLUM_LED_COUNT` | 30 | **未確認** |
-| LED 輝度上限 | `ILLUM_LED_MAX_BRIGHTNESS` | 200 | 電源容量に合わせて調整 |
-| リレー数 | `ILLUM_RELAY_COUNT` | 1 | |
-| リレー GPIO | `ILLUM_RELAY_PINS` | `{-1}` = **未設定（リレー無効）** | **未確認**。設定するまで `RELAY_PULSE` は `NOT_CONFIGURED` |
-| リレー極性 | `ILLUM_RELAY_ACTIVE_HIGH` | `{1}` | **未確認**（モジュールによって LOW アクティブ） |
-| 最大 ON 時間 | `ILLUM_RELAY_MAX_ON_MS` | 3000 ms | 超える要求は 3000 に制限し `clamped` |
-| 再噴射禁止 | `ILLUM_RELAY_COOLDOWN_MS` | 2000 ms | 中の要求は `COOLDOWN` |
+| WS2811 データ | `ILLUM_LED_PIN` | 21（ベースの「21」の穴） | |
+| LED 数 / 種類 / 色順 | `ILLUM_LED_COUNT` / `ILLUM_LED_CHIPSET` / `ILLUM_LED_COLOR_ORDER` | 70 / WS2811 / GRB | 起動時に赤 → 緑 → 青と光れば、色順は正しい |
+| LED 輝度上限 | `ILLUM_LED_MAX_BRIGHTNESS` | 200 | 電源容量に合わせて調整する |
+| COB テープ PWM | `ILLUM_COB_PIN` | 22（Atomic PWM Base） | 10 kHz / 10 bit、2 乗カーブ。-1 で COB テープなし |
+| COB 輝度上限 | `ILLUM_COB_MAX_BRIGHTNESS` | 255 | まぶしければ下げる |
+| ミストリレー | `ILLUM_MIST_PIN` | 32（Unit 2Relay RELAY-2、Grove 黄） | -1 で無効（`SET_MIST` は `NOT_CONFIGURED`） |
+| ミスト極性 | `ILLUM_MIST_ACTIVE_HIGH` | 1（HIGH = ON） | 逆に動く場合は 0 |
+| ミスト 1 回の最大時間 | `ILLUM_MIST_MAX_S` | 600 s | 空焚き防止。超える要求は `clamped` |
+| ミスト用ウォッチドッグ | `ILLUM_MIST_WATCHDOG_MS` | 1000 ms | `loop()` が止まったら強制 OFF |
+| ボタン | `ILLUM_BUTTON_PIN` | 39 | -1 でローカル操作なし |
+| ローカル操作 | `ILLUM_LOCAL_CONTROL` / `ILLUM_LOCAL_MIST` / `ILLUM_LOCAL_BRIGHTNESS` | 1 / 1 / 160 | |
+| 蒸気リレー（短パルス用） | `ILLUM_RELAY_PINS` | `{-1}` = **未設定** | Unit 2Relay のもう一方（G26）を使える。設定するまで `RELAY_PULSE` は `NOT_CONFIGURED` |
+| リレー極性 | `ILLUM_RELAY_ACTIVE_HIGH` | `{1}` | **未確認** |
+| 最大 ON 時間 / 再噴射禁止 | `ILLUM_RELAY_MAX_ON_MS` / `ILLUM_RELAY_COOLDOWN_MS` | 3000 / 2000 ms | |
 | セッション終了時の照明 | `ILLUM_SESSION_END_LIGHT_MODE` | 1 (IDLE) | |
 
-リレーの安全仕様:
+### ミストの安全仕様
 
-* 起動時: ピンの出力レベルを「OFF」に書いてから出力に切り替える（ON グリッチ防止）。`setup()` の最初に実行。
-* 通信断（Hub フレームなし 3 秒）、セッション終了、`STOP_ALL`、`RELAY_OFF` で即 OFF。
-* 通信断中は `RELAY_PULSE` を受けない（`REJECTED_STATE`）。
-* 同じ command_id は再実行しない。ON 中の追加要求は `BUSY`（延長しない）。
-* `esp_timer` による独立ウォッチドッグ（最大 ON + 100 ms）で強制 OFF。発火時は `ERROR` イベント（RELAY_WATCHDOG）。
+* 起動時: 出力レベルを「OFF」に書いてからピンを出力に切り替える（ON グリッチ防止）。
+* 1 回の実行は最大 `ILLUM_MIST_MAX_S`（10 分）。時間が来たら自動で止まり、`MIST_DONE`（COMPLETED）を送る。
+* PC 制御中は、Hub との通信断（3 秒）、セッション終了、`STOP_ALL`、`SET_MIST OFF` で即 OFF。通信断中は開始要求を受けない（`REJECTED_STATE`）。
+* 本体ボタンの長押しで、いつでも止められる（PC 制御中も有効。`MIST_DONE` reason = LOCAL_BUTTON）。
+* `esp_timer` によるウォッチドッグ: ミストが ON の間は `loop()` が 100 ms ごとにタイマを更新する。1 秒途絶えたら強制 OFF にし、`ERROR` イベント（RELAY_WATCHDOG, detail = 1）を送る。
+* 蒸気リレー（`RELAY_PULSE`）とは別の出力で、別の規則で制御する。蒸気リレーは 1 回最大 3000 ms、クールダウンあり、`esp_timer` で最大 ON + 100 ms に強制 OFF。
+
+### ローカル操作（PC のセッションがないとき）
+
+| 操作 | 動作 |
+|---|---|
+| 短押し | 次のシーン（下表）。状態 LED が青く光る |
+| 長押し（0.8 秒） | ミストの ON / OFF（緑 = ON、赤 = OFF）。OFF にすると、以後のシーンでも光だけになる |
+
+| # | シーン | 照明モード | ミスト |
+|---|---|---|---|
+| 0 | off | OFF | なし |
+| 1 | aurora mist | AURORA | 連続 |
+| 2 | storm cloud | STORM | 連続 |
+| 3 | campfire smoke | CAMPFIRE | 連続 |
+| 4 | breathing mist | MIST_GLOW | BREATH |
+| 5 | rainbow mist | GAME_PLAY | 連続 |
+| 6 | magic puff | MAGIC_PUFF | PUFF |
+| 7 | night | NIGHT | BREATH |
+
+* ローカル操作は Hub がなくても動く（展示の単体運用・実機確認用）。ローカルのミストも最大 10 分で止まる。
+* PC のセッションが始まるとローカル操作は終了する（ミスト OFF、照明は `ILLUM_SESSION_END_LIGHT_MODE`）。セッション中の短押しは無視する（状態 LED が紫に光る）。
 
 ## M5Dial ×2（Device ID 0x20 / 0x21）
 
@@ -97,47 +131,23 @@ NeoGacha との違い:
 
 ## 照明モード・演出（Illumination）
 
-| モード | 描画 |
-|---|---|
-| OFF | 消灯 |
-| IDLE | pacifica |
-| STUDY | 暖色の呼吸 |
-| GAME_READY | シアンのチェイス |
-| GAME_PLAY | レインボー（speed で速度） |
-| RESULT | ゴールドのきらめき |
-| ERROR | 赤点滅 1 Hz |
-| CUSTOM | `color`。speed=0 で点灯、>0 で呼吸 |
+| モード | WS2811 | COB |
+|---|---|---|
+| OFF | 消灯 | 消灯 |
+| IDLE | pacifica | ゆっくり明暗 |
+| STUDY | 暖色の呼吸 | 明るめで一定（デスクライト） |
+| GAME_READY | シアンのチェイス | 暗め |
+| GAME_PLAY | レインボー（speed で速度） | 暖色の下地 |
+| RESULT | ゴールドのきらめき | やや明るい |
+| ERROR | 赤点滅 1 Hz | 消灯 |
+| CUSTOM | `color`。speed=0 で点灯、>0 で呼吸 | `brightness` |
+| AURORA | 青緑〜紫が流れる | ゆったり明暗 |
+| STORM | 雷雲 + 稲妻 | 普段はほのか、稲妻で明るく |
+| CAMPFIRE | 炎（Fire2012） | ロウソクのゆらぎ |
+| MIST_GLOW | ミストが出ている間は明るく、止まると暗く | ミストと連動 |
+| MAGIC_PUFF | ミストが出ている間はキラキラ | ミストと連動 |
+| NIGHT | 消灯 | ゆっくり呼吸 |
 
-`transition_ms` でモード切替をクロスフェード。演出（既定時間）: GAME_START 1500, ARM_MOVE 600, ARM_DESCEND 1200, CATCH 800, BALL_RECEIVED 1000, BALL_RELEASED 1000, SCORE 1500, GAME_CLEAR 4000, GAME_OVER 2500 ms（最大 10000 ms）。
-
-## 単体 Illumination 演出（atom_led_mist）
-
-`firmware/atom_led_mist/atom_led_mist.ino`。Hub / ESP-NOW / PC を使わず、本体ボタンだけで動く。
-上の Illumination ATOM（Device ID 0x10）とは別ファームで、`config/*.h` は使わない（設定はスケッチ先頭の定数）。
-
-| 項目 | ATOM Lite | AtomS3 Lite | 備考 |
-|---|---|---|---|
-| COB テープ PWM（Atomic PWM Base） | G22 | G5 | 電球色 12V。10 kHz / 10 bit |
-| WS2811 データ | G21 | G39 | 70 IC（14 IC/m × 5 m）、GRB |
-| 噴霧リレー（Unit 2Relay の RELAY-2） | G32 | G2 | HIGH = ON（逆なら `RELAY_ON`/`RELAY_OFF` を入れ替え） |
-| ボタン | G39 | G41 | |
-
-操作: 短押しで次のシーン、長押し（約 0.8 秒）で噴霧の ON/OFF（全体が緑 = 噴霧 ON、赤 = 光のみ）。
-起動時に赤 → 緑 → 青と全体が光れば WS2811 の色順は正しい。
-
-| シーン | COB | WS2811 | 噴霧 |
-|---|---|---|---|
-| off | 消灯 | 消灯 | なし |
-| aurora mist | ゆったり明暗 | オーロラ | 連続 |
-| storm cloud | 稲妻で明るく | 雷雲 + 稲妻 | 連続 |
-| campfire smoke | ロウソクのゆらぎ | 炎（Fire2012） | 連続 |
-| breathing mist | 霧と連動 | 霧と連動して明暗 | 8 秒出す / 6 秒休む |
-| rainbow mist | 一定の暖色 | 虹 | 連続 |
-| magic puff | 霧と連動 | 霧が出るたびキラキラ | 3 秒出す / 9 秒休む |
-| night | ゆっくり呼吸 | 消灯 | 8 秒出す / 6 秒休む |
-
-噴霧の安全仕様（ゲーム用 Illumination のリレーとは別の考え方）:
-
-* 起動時は必ず噴霧 OFF。
-* 1 シーンで噴霧できる合計時間は `MIST_MAX_ON_MS`（10 分）。超えると自動停止し、シーン切替か長押しで再カウント。
-* ゲーム用の「1 回最大 3000 ms・クールダウン・ウォッチドッグ」は適用されない。蒸気発生器など長時間 ON が危険な機器には使わないこと。
+MIST_GLOW / MAGIC_PUFF はミストの出力に連動するので、`SET_MIST` と組み合わせて使う。
+`transition_ms` を指定すると、モード切替時に WS2811 と COB の両方がクロスフェードする。演出（既定時間）: GAME_START 1500, ARM_MOVE 600, ARM_DESCEND 1200, CATCH 800, BALL_RECEIVED 1000, BALL_RELEASED 1000, SCORE 1500, GAME_CLEAR 4000, GAME_OVER 2500 ms（最大 10000 ms）。
+演出中、COB は GAME_START で明るくなっていき、CATCH で点滅、SCORE / GAME_CLEAR で全灯、GAME_OVER でフェードアウトする。

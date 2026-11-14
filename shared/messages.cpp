@@ -13,6 +13,7 @@ const char* commandName(uint8_t code) {
     case CommandCode::TriggerEffect: return "TRIGGER_EFFECT";
     case CommandCode::RelayPulse: return "RELAY_PULSE";
     case CommandCode::RelayOff: return "RELAY_OFF";
+    case CommandCode::SetMist: return "SET_MIST";
     case CommandCode::ArmReceiver: return "ARM_RECEIVER";
     case CommandCode::DisarmReceiver: return "DISARM_RECEIVER";
     case CommandCode::ReleaseBall: return "RELEASE_BALL";
@@ -27,6 +28,7 @@ const char* eventName(uint8_t code) {
     case EventCode::ReleaseDone: return "RELEASE_DONE";
     case EventCode::ReleaseFailed: return "RELEASE_FAILED";
     case EventCode::RelayDone: return "RELAY_DONE";
+    case EventCode::MistDone: return "MIST_DONE";
     case EventCode::DeviceError: return "ERROR";
   }
   return nullptr;
@@ -84,6 +86,7 @@ int commandParamLength(uint8_t code) {
     case CommandCode::TriggerEffect: return 4;
     case CommandCode::RelayPulse: return 3;
     case CommandCode::RelayOff: return 1;
+    case CommandCode::SetMist: return 3;
   }
   return -1;
 }
@@ -143,6 +146,12 @@ size_t encodeRelayOff(uint8_t relay_id, uint8_t* out, size_t cap) {
   return w.ok() ? w.size() : 0;
 }
 
+size_t encodeSetMist(const SetMistParams& p, uint8_t* out, size_t cap) {
+  Writer w(out, cap);
+  w.u8(static_cast<uint8_t>(CommandCode::SetMist)).u8(p.pattern).u16(p.duration_s);
+  return w.ok() ? w.size() : 0;
+}
+
 bool decodeSetMode(const uint8_t* p, size_t n, OperationMode& m) {
   if (n != 1 || p[0] > static_cast<uint8_t>(OperationMode::Game)) return false;
   m = static_cast<OperationMode>(p[0]);
@@ -159,7 +168,7 @@ bool decodeSetLightMode(const uint8_t* p, size_t n, SetLightModeParams& out) {
   out.g = r.u8();
   out.b = r.u8();
   if (!r.ok() || !r.atEnd()) return false;
-  return out.mode <= static_cast<uint8_t>(LightMode::Custom);
+  return out.mode <= static_cast<uint8_t>(LightMode::Night);
 }
 bool decodeTriggerEffect(const uint8_t* p, size_t n, TriggerEffectParams& out) {
   if (n != 4) return false;
@@ -184,6 +193,14 @@ bool decodeRelayOff(const uint8_t* p, size_t n, uint8_t& relay_id) {
   return true;
 }
 
+bool decodeSetMist(const uint8_t* p, size_t n, SetMistParams& out) {
+  if (n != 3) return false;
+  Reader r(p, n);
+  out.pattern = r.u8();
+  out.duration_s = r.u16();
+  return r.ok() && out.pattern <= static_cast<uint8_t>(MistPattern::Puff);
+}
+
 size_t encodeEvent(const EventData& e, uint8_t* out, size_t cap) {
   Writer w(out, cap);
   w.u8(e.code);
@@ -193,6 +210,7 @@ size_t encodeEvent(const EventData& e, uint8_t* out, size_t cap) {
     case EventCode::ReleaseDone: w.u32(e.command_id).u16(e.elapsed_ms); break;
     case EventCode::ReleaseFailed: w.u32(e.command_id).u8(e.reason); break;
     case EventCode::RelayDone: w.u8(e.relay_id).u16(e.elapsed_ms).u8(e.reason); break;
+    case EventCode::MistDone: w.u16(e.on_s).u8(e.reason); break;
     case EventCode::DeviceError: w.u8(e.reason).u8(e.detail); break;
     default: return 0;
   }
@@ -216,6 +234,10 @@ bool decodeEvent(const uint8_t* in, size_t len, EventData& e) {
     case EventCode::RelayDone:
       e.relay_id = r.u8();
       e.elapsed_ms = r.u16();
+      e.reason = r.u8();
+      break;
+    case EventCode::MistDone:
+      e.on_s = r.u16();
       e.reason = r.u8();
       break;
     case EventCode::DeviceError:
@@ -291,7 +313,11 @@ size_t encodeStatus(const StatusCommon& c, const IlluminationStatus* il, const D
         .u8(il->relay_on_mask)
         .u16(il->relay_remaining_ms)
         .u16(il->relay_cooldown_ms)
-        .u16(il->relay_pulses);
+        .u16(il->relay_pulses)
+        .u8(il->mist_pattern)
+        .u8(il->mist_flags)
+        .u16(il->mist_remaining_s)
+        .u16(il->mist_on_s);
   } else if (c.device_type == static_cast<uint8_t>(DeviceType::Dial)) {
     if (!dl) return 0;
     w.u8(dl->dial_state)
@@ -328,6 +354,10 @@ bool decodeStatus(const uint8_t* in, size_t len, StatusCommon& c, IlluminationSt
     il.relay_remaining_ms = r.u16();
     il.relay_cooldown_ms = r.u16();
     il.relay_pulses = r.u16();
+    il.mist_pattern = r.u8();
+    il.mist_flags = r.u8();
+    il.mist_remaining_s = r.u16();
+    il.mist_on_s = r.u16();
   } else if (c.device_type == static_cast<uint8_t>(DeviceType::Dial)) {
     dl.dial_state = r.u8();
     dl.cycle = r.u16();

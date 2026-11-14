@@ -1,4 +1,5 @@
-// Illumination: light modes, effect priority / expiry, steam relay safety.
+// Illumination: light modes, effect priority / expiry, steam relay safety,
+// mist patterns / limits / safety, local button scenes.
 #include <unity.h>
 
 #include "../support.h"
@@ -24,11 +25,24 @@ struct Gpio : RelayOutput {
   }
 };
 
+struct MistPin : MistOutput {
+  bool on = false;
+  int on_count = 0;
+  int writes = 0;
+  void setMist(bool v) override {
+    if (v && !on) ++on_count;
+    on = v;
+    ++writes;
+  }
+};
+
 struct Rig {
   Gpio gpio;
   bool configured[1] = {true};
   RelayController relay{gpio, 1, configured, 3000, 2000};
-  IlluminationController app{relay, LightMode::Idle};
+  MistPin mist_pin;
+  MistController mist{mist_pin, true, 600000};
+  IlluminationController app{relay, mist, LightMode::Idle};
   FakeEmitter em;
   Rig() {
     app.setEmitter(&em);
@@ -48,6 +62,14 @@ struct Rig {
     p.mode = static_cast<uint8_t>(m);
     size_t n = encodeSetLightMode(p, b, sizeof(b));
     return app.onCommand(CommandCode::SetLightMode, b + 1, n - 1, 1, now);
+  }
+  CommandOutcome setMist(MistPattern pat, uint16_t s, uint32_t now) {
+    uint8_t b[8];
+    SetMistParams p;
+    p.pattern = static_cast<uint8_t>(pat);
+    p.duration_s = s;
+    size_t n = encodeSetMist(p, b, sizeof(b));
+    return app.onCommand(CommandCode::SetMist, b + 1, n - 1, 1, now);
   }
   CommandOutcome effect(EffectId e, uint16_t ms, uint32_t now) {
     uint8_t b[8];
@@ -198,6 +220,178 @@ void test_arm_release_unsupported_here() {
   TEST_ASSERT_EQUAL(AckResult::Unsupported, r.app.onCommand(CommandCode::ReleaseBall, nullptr, 0, 1, 0).result);
 }
 
+void test_mist_boot_off_and_new_light_modes() {
+  Rig r;
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  TEST_ASSERT_TRUE(r.mist_pin.writes >= 1);  // OFF actively written at boot
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.mode(LightMode::Aurora, 0).result);
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.mode(LightMode::Night, 0).result);
+  uint8_t b[16];
+  SetLightModeParams p;
+  p.mode = static_cast<uint8_t>(LightMode::Night) + 1;
+  size_t n = encodeSetLightMode(p, b, sizeof(b));
+  TEST_ASSERT_EQUAL(AckResult::InvalidParams,
+                    r.app.onCommand(CommandCode::SetLightMode, b + 1, n - 1, 1, 0).result);
+}
+
+void test_mist_patterns() {
+  Rig r;
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.setMist(MistPattern::Breath, 60, 1000).result);
+  TEST_ASSERT_TRUE(r.mist_pin.on);
+  r.app.tick(1000 + 7999);
+  TEST_ASSERT_TRUE(r.mist_pin.on);
+  r.app.tick(1000 + 8000);  // 8 s on
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  r.app.tick(1000 + 13999);
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  r.app.tick(1000 + 14000);  // 6 s off
+  TEST_ASSERT_TRUE(r.mist_pin.on);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(IlluminationState::MistActive), r.app.state());
+  // a new pattern replaces the running one without MIST_DONE
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.setMist(MistPattern::Puff, 60, 20000).result);
+  TEST_ASSERT_EQUAL(0, r.em.count(EventCode::MistDone));
+  r.app.tick(20000 + 2999);
+  TEST_ASSERT_TRUE(r.mist_pin.on);
+  r.app.tick(20000 + 3000);
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  TEST_ASSERT_TRUE(MistController::patternOn(MistPattern::Continuous, 123456));
+  TEST_ASSERT_FALSE(MistController::patternOn(MistPattern::Off, 0));
+}
+
+void test_mist_duration_clamp_and_done_event() {
+  Rig r;
+  CommandOutcome o = r.setMist(MistPattern::Continuous, 5, 0);
+  TEST_ASSERT_EQUAL(AckResult::Accepted, o.result);
+  TEST_ASSERT_FALSE(o.flags & u8(AckFlag::Clamped));
+  IlluminationStatus il;
+  DialStatus dl;
+  r.app.tick(2000);
+  r.app.fillStatus(il, dl);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(MistPattern::Continuous), il.mist_pattern);
+  TEST_ASSERT_TRUE(il.mist_flags & u8(MistStatusFlag::OutputOn));
+  TEST_ASSERT_EQUAL(3, il.mist_remaining_s);
+  TEST_ASSERT_EQUAL(2, il.mist_on_s);
+  r.app.tick(4999);
+  TEST_ASSERT_TRUE(r.mist_pin.on);
+  r.app.tick(5000);
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  TEST_ASSERT_EQUAL(1, r.em.count(EventCode::MistDone));
+  TEST_ASSERT_EQUAL(5, r.em.events[0].on_s);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(RelayEndReason::Completed), r.em.events[0].reason);
+  // > 600 s -> clamped to the device maximum
+  o = r.setMist(MistPattern::Continuous, 3600, 10000);
+  TEST_ASSERT_TRUE(o.flags & u8(AckFlag::Clamped));
+  r.app.tick(10000 + 599999);
+  TEST_ASSERT_TRUE(r.mist_pin.on);
+  r.app.tick(10000 + 600000);
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  // 0 = maximum, not clamped
+  o = r.setMist(MistPattern::Continuous, 0, 700000);
+  TEST_ASSERT_FALSE(o.flags & u8(AckFlag::Clamped));
+}
+
+void test_mist_safety_paths() {
+  Rig r;
+  r.setMist(MistPattern::Continuous, 0, 0);
+  r.app.onHubLinkChanged(false, 100);
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  TEST_ASSERT_EQUAL(AckResult::RejectedState, r.setMist(MistPattern::Continuous, 0, 200).result);
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.setMist(MistPattern::Off, 0, 200).result);  // OFF always ok
+  r.app.onHubLinkChanged(true, 300);
+  r.setMist(MistPattern::Continuous, 0, 300);
+  r.app.onSessionChanged(0, 400);
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  r.app.onSessionChanged(5, 500);
+  r.setMist(MistPattern::Continuous, 0, 500);
+  r.app.onCommand(CommandCode::StopAll, nullptr, 0, 9, 600);
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  r.setMist(MistPattern::Continuous, 0, 700);
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.setMist(MistPattern::Off, 0, 800).result);
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  size_t done = r.em.count(EventCode::MistDone);
+  TEST_ASSERT_EQUAL(4, done);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(RelayEndReason::OffCommand), r.em.events.back().reason);
+  // invalid pattern
+  uint8_t bad[3] = {4, 0, 0};
+  TEST_ASSERT_EQUAL(AckResult::InvalidParams, r.app.onCommand(CommandCode::SetMist, bad, 3, 10, 900).result);
+  // physical stop with the button while the PC is in control
+  r.setMist(MistPattern::Continuous, 0, 1000);
+  TEST_ASSERT_EQUAL(ButtonResult::MistOff, r.app.onButtonLong(1100));
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(RelayEndReason::LocalButton), r.em.events.back().reason);
+  TEST_ASSERT_EQUAL(ButtonResult::Ignored, r.app.onButtonShort(1200));  // session 5 is active
+}
+
+void test_mist_not_configured() {
+  Gpio g;
+  bool cfg[1] = {false};
+  RelayController rc(g, 1, cfg, 3000, 0);
+  MistPin pin;
+  MistController mc(pin, false, 600000);
+  IlluminationController app(rc, mc, LightMode::Idle);
+  app.begin(0);
+  app.onHubLinkChanged(true, 0);
+  uint8_t b[3] = {1, 0, 0};
+  TEST_ASSERT_EQUAL(AckResult::NotConfigured, app.onCommand(CommandCode::SetMist, b, 3, 1, 0).result);
+  TEST_ASSERT_EQUAL(0, pin.writes);  // an unconfigured pin is never touched
+  TEST_ASSERT_TRUE(app.flags() & u8(NodeFlag::ConfigError));
+}
+
+void test_local_scenes_without_pc() {
+  Rig r;
+  r.app.onHubLinkChanged(false, 0);  // standalone: no hub at all
+  TEST_ASSERT_EQUAL(ButtonResult::SceneChanged, r.app.onButtonShort(100));
+  TEST_ASSERT_TRUE(r.app.localMode());
+  TEST_ASSERT_EQUAL(LightMode::Aurora, r.app.lighting().mode().mode);  // scene 1 = aurora mist
+  TEST_ASSERT_TRUE(r.mist_pin.on);
+  r.app.onButtonShort(200);  // storm cloud
+  TEST_ASSERT_EQUAL(LightMode::Storm, r.app.lighting().mode().mode);
+  TEST_ASSERT_TRUE(r.mist_pin.on);
+  // long press: mist off, the next scenes stay dry
+  TEST_ASSERT_EQUAL(ButtonResult::MistOff, r.app.onButtonLong(300));
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  r.app.onButtonShort(400);  // campfire
+  TEST_ASSERT_EQUAL(LightMode::Campfire, r.app.lighting().mode().mode);
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  TEST_ASSERT_EQUAL(ButtonResult::MistOn, r.app.onButtonLong(500));
+  TEST_ASSERT_TRUE(r.mist_pin.on);
+  TEST_ASSERT_EQUAL(0, r.em.count(EventCode::MistDone));  // local runs are not reported
+  // the local mist also stops at the device maximum
+  r.app.tick(500 + 599999);
+  TEST_ASSERT_TRUE(r.mist_pin.on);
+  r.app.tick(500 + 600000);
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  // wraps around to "off"
+  for (int i = 0; i < 5; ++i) r.app.onButtonShort(700000 + i);
+  TEST_ASSERT_EQUAL(0, r.app.localScene());
+  TEST_ASSERT_EQUAL(LightMode::Off, r.app.lighting().mode().mode);
+}
+
+void test_pc_session_takes_over_local_mode() {
+  Rig r;
+  r.app.onButtonShort(0);
+  TEST_ASSERT_TRUE(r.mist_pin.on);
+  r.app.onSessionChanged(42, 100);  // PC connects
+  TEST_ASSERT_FALSE(r.app.localMode());
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+  TEST_ASSERT_EQUAL(LightMode::Idle, r.app.lighting().mode().mode);  // back to the session-end mode
+  TEST_ASSERT_EQUAL(0, r.em.count(EventCode::MistDone));
+  IlluminationStatus il;
+  DialStatus dl;
+  r.app.fillStatus(il, dl);
+  TEST_ASSERT_FALSE(il.mist_flags & u8(MistStatusFlag::LocalMode));
+}
+
+void test_local_mode_disabled_by_config() {
+  Rig r;
+  LocalConfig c;
+  c.enabled = false;
+  r.app.setLocalConfig(c);
+  TEST_ASSERT_EQUAL(ButtonResult::Ignored, r.app.onButtonShort(0));
+  TEST_ASSERT_EQUAL(ButtonResult::Ignored, r.app.onButtonLong(0));
+  TEST_ASSERT_FALSE(r.mist_pin.on);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_boot_relay_off);
@@ -210,5 +404,13 @@ int main() {
   RUN_TEST(test_relay_not_configured);
   RUN_TEST(test_same_command_id_never_fires_twice_via_node_core);
   RUN_TEST(test_arm_release_unsupported_here);
+  RUN_TEST(test_mist_boot_off_and_new_light_modes);
+  RUN_TEST(test_mist_patterns);
+  RUN_TEST(test_mist_duration_clamp_and_done_event);
+  RUN_TEST(test_mist_safety_paths);
+  RUN_TEST(test_mist_not_configured);
+  RUN_TEST(test_local_scenes_without_pc);
+  RUN_TEST(test_pc_session_takes_over_local_mode);
+  RUN_TEST(test_local_mode_disabled_by_config);
   return UNITY_END();
 }

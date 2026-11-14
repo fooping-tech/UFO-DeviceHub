@@ -54,6 +54,7 @@ size_t HubCore::pcOutboxSize() const {
 
 void HubCore::fillHeader(Packet& p, uint8_t dest, MsgType t, uint32_t txn) {
   p.h = Header();
+  p.h.magic = systemMagic(cfg_.system_id);
   p.h.source = kHubId;
   p.h.destination = dest;
   p.h.type = t;
@@ -221,7 +222,7 @@ void HubCore::onFrame(const uint8_t* src_mac, const uint8_t* data, size_t len, i
     return;
   }
   Packet p;
-  DecodeError err = decodePacket(data, len, p);
+  DecodeError err = decodePacket(data, len, p, systemMagic(cfg_.system_id));
   if (err != DecodeError::Ok) {
     ++ch->c.invalid;
     switch (err) {

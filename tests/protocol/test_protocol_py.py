@@ -18,7 +18,7 @@ def test_golden_vectors(v):
         with pytest.raises(ProtocolError, match=v["error"]):
             Packet.decode(raw)
         return
-    p = Packet.decode(raw)
+    p = Packet.decode(raw, P.system_magic(v["system_id"]))
     assert (p.source, p.destination, p.message_type) == (v["source"], v["destination"], v["message_type"])
     assert (p.sequence, p.session_id, p.command_id) == (v["sequence"], v["session_id"], v["command_id"])
     assert p.payload.hex() == v["payload_hex"]
@@ -53,6 +53,10 @@ def test_payload_limits():
         ("RELAY_PULSE", {"duration_ms": 70000}),
         ("RELAY_PULSE", {"duration_ms": True}),
         ("SET_MODE", {"mode": "PARTY"}),
+        ("SET_MIST", {}),
+        ("SET_MIST", {"pattern": "FOG"}),
+        ("SET_MIST", {"pattern": "PUFF", "duration_s": 70000}),
+        ("SET_LIGHT_MODE", {"mode": 14}),
         ("RELEASE_BALL", {"angle": 90}),  # no wire parameters for angles
         ("SESSION_BEGIN", {}),  # hub only
         ("SELF_DESTRUCT", {}),
@@ -105,5 +109,25 @@ def test_command_payload_encoding_matches_hub_layout():
                 "SET_LIGHT_MODE": {"mode": "IDLE"},
                 "TRIGGER_EFFECT": {"effect": "SCORE"},
                 "RELAY_PULSE": {"duration_ms": 1},
+                "SET_MIST": {"pattern": "PUFF"},
             }.get(code.name, {})
             assert len(P.encode_command_payload(code.name, params)) == 1 + n, code.name
+
+
+def test_set_mist_and_new_light_modes():
+    assert P.normalize_command("SET_MIST", {"pattern": "breath"}) == {"pattern": "BREATH", "duration_s": 0}
+    assert P.encode_command_payload("SET_MIST", {"pattern": "PUFF", "duration_s": 300}).hex() == "14032c01"
+    assert P.normalize_command("SET_LIGHT_MODE", {"mode": "MAGIC_PUFF"})["mode"] == "MAGIC_PUFF"
+    assert P.encode_event_payload(P.EventCode.MIST_DONE, on_s=95, reason=0).hex() == "215f0000"
+
+
+def test_system_magic_and_hello():
+    assert P.system_magic(1) == 0x5546 and P.system_magic(2) == 0x5547
+    raw = Packet(1, 0x20, 1, payload=b"\x04", magic=P.system_magic(2)).encode()
+    with pytest.raises(ProtocolError, match="bad_magic"):
+        Packet.decode(raw)  # a system 1 decoder
+    assert Packet.decode(raw, P.system_magic(2)).payload == b"\x04"
+    assert P.hello(5, 2)["system_id"] == 2
+    assert "system_id" not in P.hello(5)
+    with pytest.raises(ProtocolError):
+        P.hello(5, 0)

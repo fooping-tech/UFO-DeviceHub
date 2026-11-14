@@ -13,6 +13,7 @@ namespace ufo {
 
 NodeConfig NodeRuntime::makeConfig(uint8_t self_id) {
   NodeConfig c;
+  c.system_id = systemId();
   c.self_id = self_id;
   const DeviceEntry* self = findDevice(self_id);
   c.device_type = self ? self->type : DeviceType::Dial;
@@ -36,13 +37,21 @@ NodeRuntime::NodeRuntime(uint8_t self_id, NodeApp& app)
 bool NodeRuntime::begin() {
   self_ = findDevice(self_id_);
   hub_ = findDevice(kHubId);
-  radio_ok_ = radio_.begin(wifiChannel(), primaryMasterKey());
+  sep_issues_ = systemSeparationIssues();
+  if (sep_issues_ & kSepErrors) {
+    // Two systems would interfere: stay off the air (status LED / display shows it).
+    radio_ok_ = false;
+    Serial.printf("ERROR: system config: %s - radio NOT started\n", systemSeparationText(sep_issues_));
+  } else {
+    radio_ok_ = radio_.begin(wifiChannel(), primaryMasterKey());
+    if (sep_issues_) Serial.printf("WARNING: system config: %s\n", systemSeparationText(sep_issues_));
+  }
   radio_.selfMac(self_mac_);
   snprintf(self_mac_str_, sizeof(self_mac_str_), "%02X:%02X:%02X:%02X:%02X:%02X", self_mac_[0], self_mac_[1],
            self_mac_[2], self_mac_[3], self_mac_[4], self_mac_[5]);
   mac_mismatch_ = !self_ || !macEqual(self_->mac, self_mac_);
-  Serial.printf("UFO device id=0x%02X name=%s MAC=%s channel=%u fw=%s\n", self_id_, self_ ? self_->name : "?",
-                self_mac_str_, wifiChannel(), UFO_FW_VERSION_STR);
+  Serial.printf("UFO system=%u device id=0x%02X name=%s MAC=%s channel=%u fw=%s\n", systemId(), self_id_,
+                self_ ? self_->name : "?", self_mac_str_, wifiChannel(), UFO_FW_VERSION_STR);
   if (mac_mismatch_) Serial.println("WARNING: own MAC differs from config/devices.h - the hub will ignore us");
   if (usingExampleKeys()) Serial.println("WARNING: EXAMPLE ESP-NOW KEYS IN USE (tests/tools/gen_secrets.py)");
   // Only the hub is a peer: frames from any other MAC are dropped in the radio callback.

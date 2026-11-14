@@ -22,6 +22,7 @@ void NodeCore::fillHeader(Packet& p, MsgType t, uint32_t txn) {
   p.h = Header();
   p.h.source = cfg_.self_id;
   p.h.destination = cfg_.hub_id;
+  p.h.magic = systemMagic(cfg_.system_id);
   p.h.type = t;
   p.h.sequence = next_seq_++;
   p.h.session = session_;
@@ -46,7 +47,7 @@ void NodeCore::onFrame(const uint8_t* src_mac, const uint8_t* data, size_t len, 
     return;
   }
   Packet p;
-  if (decodePacket(data, len, p) != DecodeError::Ok) {
+  if (decodePacket(data, len, p, systemMagic(cfg_.system_id)) != DecodeError::Ok) {
     ++counters_.rx_bad_frame;
     return;
   }

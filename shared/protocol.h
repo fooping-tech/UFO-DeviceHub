@@ -26,7 +26,14 @@
 
 namespace ufo {
 
-constexpr uint16_t kMagic = 0x5546;
+constexpr uint16_t kMagic = 0x5546;  // system 1
+// Several UFO systems may run in the same venue. Each system uses its own magic
+// (system 1 = 0x5546, system 2 = 0x5547, ...), so a frame of another system is
+// rejected while decoding (bad_magic) even if keys / MAC tables were mixed up.
+constexpr uint8_t kMaxSystemId = 8;
+constexpr uint16_t systemMagic(uint8_t system_id) {
+  return static_cast<uint16_t>(kMagic + (system_id == 0 ? 0 : system_id - 1));
+}
 constexpr uint8_t kProtocolVersion = 1;
 constexpr size_t kHeaderSize = 17;
 constexpr size_t kMaxPacketSize = 64;
@@ -76,7 +83,7 @@ const char* decodeErrorName(DecodeError e);
 // Returns the number of bytes written, or 0 if the packet is invalid / cap too small.
 size_t encodePacket(const Packet& p, uint8_t* out, size_t cap);
 // Strict: the frame must be exactly kHeaderSize + payload_length bytes.
-DecodeError decodePacket(const uint8_t* in, size_t len, Packet& out);
+DecodeError decodePacket(const uint8_t* in, size_t len, Packet& out, uint16_t magic = kMagic);
 
 // ---- little-endian byte helpers -------------------------------------------
 class Writer {

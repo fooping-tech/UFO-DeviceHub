@@ -105,6 +105,7 @@ class HubSink {
 };
 
 struct HubConfig {
+  uint8_t system_id = 1;  // UFO system in the venue (selects the packet magic)
   RetryPolicy command_policy;
   uint32_t heartbeat_interval_ms = 1000;
   uint32_t link_timeout_ms = 3000;

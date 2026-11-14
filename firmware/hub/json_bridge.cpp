@@ -7,7 +7,9 @@ namespace ufo {
 
 namespace {
 
-const char* const kLightModes[] = {"OFF", "IDLE", "STUDY", "GAME_READY", "GAME_PLAY", "RESULT", "ERROR", "CUSTOM"};
+const char* const kLightModes[] = {"OFF",    "IDLE",  "STUDY",    "GAME_READY", "GAME_PLAY",  "RESULT", "ERROR",
+                                   "CUSTOM", "AURORA", "STORM", "CAMPFIRE", "MIST_GLOW", "MAGIC_PUFF", "NIGHT"};
+const char* const kMistPatterns[] = {"OFF", "CONTINUOUS", "BREATH", "PUFF"};
 const char* const kEffects[] = {"NONE",          "GAME_START", "ARM_MOVE", "ARM_DESCEND", "CATCH",
                                 "BALL_RECEIVED", "BALL_RELEASED", "SCORE", "GAME_CLEAR", "GAME_OVER"};
 const char* const kDialStates[] = {"DISABLED",  "READY",     "ARMED",    "BALL_DETECTED",
@@ -106,7 +108,12 @@ const char* stateName(uint8_t device_type, uint8_t s) {
 
 }  // namespace
 
-const char* lightModeName(uint8_t m) { return m < 8 ? kLightModes[m] : "UNKNOWN"; }
+const char* lightModeName(uint8_t m) {
+  return m < sizeof(kLightModes) / sizeof(kLightModes[0]) ? kLightModes[m] : "UNKNOWN";
+}
+const char* mistPatternName(uint8_t p) {
+  return p < sizeof(kMistPatterns) / sizeof(kMistPatterns[0]) ? kMistPatterns[p] : "UNKNOWN";
+}
 const char* effectName(uint8_t e) { return e < 10 ? kEffects[e] : "UNKNOWN"; }
 const char* dialStateName(uint8_t s) { return s < 8 ? kDialStates[s] : "UNKNOWN"; }
 const char* illuminationStateName(uint8_t s) {
@@ -114,6 +121,7 @@ const char* illuminationStateName(uint8_t s) {
     case IlluminationState::Normal: return "NORMAL";
     case IlluminationState::Effect: return "EFFECT";
     case IlluminationState::RelayActive: return "RELAY_ACTIVE";
+    case IlluminationState::MistActive: return "MIST_ACTIVE";
     case IlluminationState::Error: return "ERROR";
   }
   return "UNKNOWN";
@@ -129,6 +137,7 @@ const char* deviceTypeName(uint8_t t) {
 bool parseLightMode(JsonVariantConst v, uint8_t& out) { return parseNamed(v, kLightModes, 0, out); }
 bool parseEffect(JsonVariantConst v, uint8_t& out) { return parseNamed(v, kEffects, 1, out); }
 bool parseOperationMode(JsonVariantConst v, uint8_t& out) { return parseNamed(v, kOpModes, 0, out); }
+bool parseMistPattern(JsonVariantConst v, uint8_t& out) { return parseNamed(v, kMistPatterns, 0, out); }
 
 void formatMac(const uint8_t mac[6], char out[18]) {
   snprintf(out, 18, "%02X:%02X:%02X:%02X:%02X:%02X", mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
@@ -240,6 +249,20 @@ size_t buildCommandPayload(const char* name, JsonVariantConst params, uint8_t* o
     }
     return encodeRelayOff(static_cast<uint8_t>(v), out, cap);
   }
+  if (strcmp(name, "SET_MIST") == 0) {
+    SetMistParams p;
+    uint32_t v;
+    if (!parseMistPattern(params["pattern"], p.pattern)) {
+      *error = "pattern must be OFF, CONTINUOUS, BREATH or PUFF";
+      return 0;
+    }
+    if (!getUint(params, "duration_s", 65535, 0, false, v)) {
+      *error = "duration_s 0-65535 (0 = device max)";
+      return 0;
+    }
+    p.duration_s = static_cast<uint16_t>(v);
+    return encodeSetMist(p, out, cap);
+  }
   *error = "unknown command";
   return 0;
 }
@@ -290,6 +313,8 @@ void HubJsonBridge::emitBoot() {
   d["fw"] = info_.fw;
   d["hub_mac"] = mac;
   d["channel"] = info_.channel;
+  d["system_id"] = info_.system_id;
+  d["system_check"] = info_.system_check;
   d["example_keys"] = info_.example_keys;
   d["example_devices"] = info_.example_devices;
   emit(d);
@@ -333,6 +358,14 @@ void HubJsonBridge::handleLine(const char* line, size_t len, uint32_t now) {
       error("BAD_REQUEST", "session_id must be a non-zero uint32");
       return;
     }
+    // A PC that names its system is never attached to the hub of another system.
+    JsonVariantConst sys = doc["system_id"];
+    if (!sys.isNull() && (!sys.is<uint32_t>() || sys.as<uint32_t>() != info_.system_id)) {
+      char detail[48];
+      snprintf(detail, sizeof(detail), "this hub is system %u", info_.system_id);
+      error("SYSTEM_MISMATCH", detail);
+      return;
+    }
     core_->openSession(s.as<uint32_t>(), now);
     JsonDocument d;
     char mac[18];
@@ -344,6 +377,8 @@ void HubJsonBridge::handleLine(const char* line, size_t len, uint32_t now) {
     d["hub_id"] = kHubId;
     d["hub_mac"] = mac;
     d["channel"] = info_.channel;
+    d["system_id"] = info_.system_id;
+    d["system_check"] = info_.system_check;
     d["example_keys"] = info_.example_keys;
     d["example_devices"] = info_.example_devices;
     emit(d);
@@ -453,6 +488,10 @@ void HubJsonBridge::eventToPc(const PcEvent& e) {
       data["on_ms"] = e.data.elapsed_ms;
       data["reason"] = e.data.reason;
       break;
+    case EventCode::MistDone:
+      data["on_s"] = e.data.on_s;
+      data["reason"] = e.data.reason;
+      break;
     case EventCode::DeviceError:
       data["code"] = e.data.reason;
       data["detail"] = e.data.detail;
@@ -486,6 +525,11 @@ void HubJsonBridge::statusToPc(uint8_t source, const StatusCommon& c, const Illu
     d["relay_remaining_ms"] = il.relay_remaining_ms;
     d["relay_cooldown_ms"] = il.relay_cooldown_ms;
     d["relay_pulses"] = il.relay_pulses;
+    d["mist_pattern"] = mistPatternName(il.mist_pattern);
+    d["mist_on"] = (il.mist_flags & u8(MistStatusFlag::OutputOn)) != 0;
+    d["local_mode"] = (il.mist_flags & u8(MistStatusFlag::LocalMode)) != 0;
+    d["mist_remaining_s"] = il.mist_remaining_s;
+    d["mist_on_s"] = il.mist_on_s;
   } else if (c.device_type == static_cast<uint8_t>(DeviceType::Dial)) {
     d["dial_state"] = dialStateName(dl.dial_state);
     d["cycle"] = dl.cycle;
@@ -575,6 +619,8 @@ void HubJsonBridge::emitDiag() {
   d["fw"] = info_.fw;
   d["hub_mac"] = mac;
   d["channel"] = info_.channel;
+  d["system_id"] = info_.system_id;
+  d["system_check"] = info_.system_check;
   d["uptime_ms"] = core_->uptime(now_);
   d["session_id"] = core_->session();
   d["example_keys"] = info_.example_keys;

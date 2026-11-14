@@ -10,7 +10,8 @@
    "session_id": 2712847316,
    "command_id": 16909060,
    "payload_hex": "22",
-   "hex": "4655010120013412d4c3b2a1040302010122"
+   "hex": "4655010120013412d4c3b2a1040302010122",
+   "system_id": 1
   },
   {
    "name": "set_light_mode",
@@ -21,7 +22,8 @@
    "session_id": 2712847316,
    "command_id": 1001,
    "payload_hex": "1004b4f40107010203",
-   "hex": "4655010110010200d4c3b2a1e9030000091004b4f40107010203"
+   "hex": "4655010110010200d4c3b2a1e9030000091004b4f40107010203",
+   "system_id": 1
   },
   {
    "name": "trigger_effect",
@@ -32,7 +34,8 @@
    "session_id": 2712847316,
    "command_id": 1002,
    "payload_hex": "1108a00fc8",
-   "hex": "4655010110010300d4c3b2a1ea030000051108a00fc8"
+   "hex": "4655010110010300d4c3b2a1ea030000051108a00fc8",
+   "system_id": 1
   },
   {
    "name": "relay_pulse",
@@ -43,7 +46,8 @@
    "session_id": 2712847316,
    "command_id": 1003,
    "payload_hex": "1200dc05",
-   "hex": "4655010110010400d4c3b2a1eb030000041200dc05"
+   "hex": "4655010110010400d4c3b2a1eb030000041200dc05",
+   "system_id": 1
   },
   {
    "name": "relay_off_all",
@@ -54,7 +58,8 @@
    "session_id": 2712847316,
    "command_id": 1004,
    "payload_hex": "13ff",
-   "hex": "4655010110010500d4c3b2a1ec0300000213ff"
+   "hex": "4655010110010500d4c3b2a1ec0300000213ff",
+   "system_id": 1
   },
   {
    "name": "set_mode_game",
@@ -65,7 +70,8 @@
    "session_id": 2712847316,
    "command_id": 1005,
    "payload_hex": "0501",
-   "hex": "4655010121010600d4c3b2a1ed030000020501"
+   "hex": "4655010121010600d4c3b2a1ed030000020501",
+   "system_id": 1
   },
   {
    "name": "session_begin",
@@ -76,7 +82,8 @@
    "session_id": 2712847316,
    "command_id": 2147483649,
    "payload_hex": "01",
-   "hex": "4655010121010700d4c3b2a1010000800101"
+   "hex": "4655010121010700d4c3b2a1010000800101",
+   "system_id": 1
   },
   {
    "name": "ack_accepted_duplicate",
@@ -87,7 +94,8 @@
    "session_id": 2712847316,
    "command_id": 16909060,
    "payload_hex": "010001341200",
-   "hex": "4655012001030800d4c3b2a10403020106010001341200"
+   "hex": "4655012001030800d4c3b2a10403020106010001341200",
+   "system_id": 1
   },
   {
    "name": "event_ball_received",
@@ -98,7 +106,8 @@
    "session_id": 2712847316,
    "command_id": 1073741825,
    "payload_hex": "100300",
-   "hex": "4655012001020900d4c3b2a10100004003100300"
+   "hex": "4655012001020900d4c3b2a10100004003100300",
+   "system_id": 1
   },
   {
    "name": "event_release_done",
@@ -109,7 +118,8 @@
    "session_id": 2712847316,
    "command_id": 77,
    "payload_hex": "12ed0300003408",
-   "hex": "4655012101020a00d4c3b2a14d0000000712ed0300003408"
+   "hex": "4655012101020a00d4c3b2a14d0000000712ed0300003408",
+   "system_id": 1
   },
   {
    "name": "event_relay_done",
@@ -120,7 +130,44 @@
    "session_id": 2712847316,
    "command_id": 78,
    "payload_hex": "2000dc0500",
-   "hex": "4655011001020b00d4c3b2a14e000000052000dc0500"
+   "hex": "4655011001020b00d4c3b2a14e000000052000dc0500",
+   "system_id": 1
+  },
+  {
+   "name": "set_mist_breath",
+   "source": 1,
+   "destination": 16,
+   "message_type": 1,
+   "sequence": 15,
+   "session_id": 2712847316,
+   "command_id": 1006,
+   "payload_hex": "14027800",
+   "hex": "4655010110010f00d4c3b2a1ee0300000414027800",
+   "system_id": 1
+  },
+  {
+   "name": "event_mist_done",
+   "source": 16,
+   "destination": 1,
+   "message_type": 2,
+   "sequence": 16,
+   "session_id": 2712847316,
+   "command_id": 79,
+   "payload_hex": "215f0000",
+   "hex": "4655011001021000d4c3b2a14f00000004215f0000",
+   "system_id": 1
+  },
+  {
+   "name": "system2_set_light_mode",
+   "source": 1,
+   "destination": 16,
+   "message_type": 1,
+   "sequence": 17,
+   "session_id": 2712847316,
+   "command_id": 1007,
+   "payload_hex": "1008a0000080000000",
+   "hex": "4755010110011100d4c3b2a1ef030000091008a0000080000000",
+   "system_id": 2
   },
   {
    "name": "hub_heartbeat",
@@ -131,7 +178,8 @@
    "session_id": 2712847316,
    "command_id": 0,
    "payload_hex": "40e2010001",
-   "hex": "4655010110050c00d4c3b2a1000000000540e2010001"
+   "hex": "4655010110050c00d4c3b2a1000000000540e2010001",
+   "system_id": 1
   },
   {
    "name": "node_heartbeat",
@@ -142,7 +190,8 @@
    "session_id": 2712847316,
    "command_id": 0,
    "payload_hex": "0c00bebafeca9f860100020003c904000001",
-   "hex": "4655011001050d00d4c3b2a100000000120c00bebafeca9f860100020003c904000001"
+   "hex": "4655011001050d00d4c3b2a100000000120c00bebafeca9f860100020003c904000001",
+   "system_id": 1
   },
   {
    "name": "max_payload",
@@ -153,7 +202,8 @@
    "session_id": 2712847316,
    "command_id": 5,
    "payload_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e",
-   "hex": "4655010120010e00d4c3b2a1050000002f000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e"
+   "hex": "4655010120010e00d4c3b2a1050000002f000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e",
+   "system_id": 1
   },
   {
    "name": "bad_magic",
@@ -189,6 +239,11 @@
    "name": "too_long",
    "hex": "4655010120010100d4c3b2a1010000000104000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
    "error": "too_long"
+  },
+  {
+   "name": "other_system_magic",
+   "hex": "4755010120010100d4c3b2a1010000000104",
+   "error": "bad_magic"
   }
  ]
 }

@@ -29,6 +29,8 @@ struct HubInfo {
   uint8_t mac[6] = {0};
   const char* fw = "0.0.0";
   uint8_t channel = 1;
+  uint8_t system_id = 1;
+  const char* system_check = "ok";  // systemSeparationText()
   bool example_keys = false;
   bool example_devices = false;
   bool example_hardware = false;
@@ -91,6 +93,7 @@ class HubJsonBridge : public HubSink {
 
 // Enum <-> name helpers shared with the tests.
 const char* lightModeName(uint8_t m);
+const char* mistPatternName(uint8_t p);
 const char* effectName(uint8_t e);
 const char* dialStateName(uint8_t s);
 const char* illuminationStateName(uint8_t s);
@@ -98,6 +101,7 @@ const char* deviceTypeName(uint8_t t);
 bool parseLightMode(JsonVariantConst v, uint8_t& out);
 bool parseEffect(JsonVariantConst v, uint8_t& out);
 bool parseOperationMode(JsonVariantConst v, uint8_t& out);
+bool parseMistPattern(JsonVariantConst v, uint8_t& out);
 void formatMac(const uint8_t mac[6], char out[18]);
 
 }  // namespace ufo

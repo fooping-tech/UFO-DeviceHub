@@ -24,6 +24,7 @@ enum class CommandCode : uint8_t {
   TriggerEffect = 0x11,   // u8 effect, u16 duration_ms, u8 intensity
   RelayPulse = 0x12,      // u8 relay_id, u16 duration_ms
   RelayOff = 0x13,        // u8 relay_id (0xFF = all)
+  SetMist = 0x14,         // u8 MistPattern, u16 duration_s (0 = device max). OFF stops the mist
   ArmReceiver = 0x20,     // no params
   DisarmReceiver = 0x21,  // no params
   ReleaseBall = 0x22,     // no params (angles/hold time are device config, not wire params)
@@ -36,6 +37,7 @@ enum class EventCode : uint8_t {
   ReleaseDone = 0x12,     // u32 command_id, u16 elapsed_ms
   ReleaseFailed = 0x13,   // u32 command_id, u8 ReleaseFailReason
   RelayDone = 0x20,       // u8 relay_id, u16 on_ms, u8 RelayEndReason
+  MistDone = 0x21,        // u16 on_s, u8 RelayEndReason
   DeviceError = 0x30,     // u8 ErrorCode, u8 detail
 };
 
@@ -86,6 +88,20 @@ enum class LightMode : uint8_t {
   Result = 0x05,
   Error = 0x06,
   Custom = 0x07,
+  // Mist scenes (COB tape + WS2811, from the former atom_led_mist sketch)
+  Aurora = 0x08,
+  Storm = 0x09,
+  Campfire = 0x0A,
+  MistGlow = 0x0B,   // brightness follows the mist (use with SET_MIST)
+  MagicPuff = 0x0C,  // sparkles while the mist is on (use with SET_MIST)
+  Night = 0x0D,
+};
+
+enum class MistPattern : uint8_t {
+  Off = 0x00,
+  Continuous = 0x01,
+  Breath = 0x02,  // 8 s on / 6 s off
+  Puff = 0x03,    // 3 s on / 9 s off
 };
 
 enum class EffectId : uint8_t {
@@ -116,6 +132,7 @@ enum class IlluminationState : uint8_t {
   Normal = 0x00,
   Effect = 0x01,
   RelayActive = 0x02,
+  MistActive = 0x03,
   Error = 0x07,
 };
 
@@ -130,6 +147,7 @@ enum class RelayEndReason : uint8_t {
   OffCommand = 0x01,
   Safety = 0x02,  // STOP_ALL / session end / link loss
   Watchdog = 0x03,
+  LocalButton = 0x04,  // stopped with the device button
 };
 
 enum class ErrorCode : uint8_t {
@@ -194,6 +212,10 @@ struct RelayPulseParams {
   uint8_t relay_id = 0;
   uint16_t duration_ms = 0;
 };
+struct SetMistParams {
+  uint8_t pattern = 0;      // MistPattern
+  uint16_t duration_s = 0;  // 0 = device maximum
+};
 
 // Command payload builders: write [code][params...]; return size or 0.
 size_t encodeCommand(CommandCode code, uint8_t* out, size_t cap);  // no-param commands
@@ -202,6 +224,7 @@ size_t encodeSetLightMode(const SetLightModeParams& p, uint8_t* out, size_t cap)
 size_t encodeTriggerEffect(const TriggerEffectParams& p, uint8_t* out, size_t cap);
 size_t encodeRelayPulse(const RelayPulseParams& p, uint8_t* out, size_t cap);
 size_t encodeRelayOff(uint8_t relay_id, uint8_t* out, size_t cap);
+size_t encodeSetMist(const SetMistParams& p, uint8_t* out, size_t cap);
 
 // Param decoders take the bytes AFTER the command code and require an exact length.
 bool decodeSetMode(const uint8_t* p, size_t n, OperationMode& m);
@@ -209,6 +232,7 @@ bool decodeSetLightMode(const uint8_t* p, size_t n, SetLightModeParams& out);
 bool decodeTriggerEffect(const uint8_t* p, size_t n, TriggerEffectParams& out);
 bool decodeRelayPulse(const uint8_t* p, size_t n, RelayPulseParams& out);
 bool decodeRelayOff(const uint8_t* p, size_t n, uint8_t& relay_id);
+bool decodeSetMist(const uint8_t* p, size_t n, SetMistParams& out);
 // Expected param length for a command code (-1 = unknown command).
 int commandParamLength(uint8_t code);
 
@@ -218,7 +242,8 @@ struct EventData {
   uint16_t cycle = 0;        // BallReceived
   uint32_t command_id = 0;   // Release*
   uint16_t elapsed_ms = 0;   // ReleaseDone / RelayDone(on_ms)
-  uint8_t reason = 0;        // ReleaseFailed / RelayDone / DeviceError(code)
+  uint16_t on_s = 0;         // MistDone
+  uint8_t reason = 0;        // ReleaseFailed / RelayDone / MistDone / DeviceError(code)
   uint8_t relay_id = 0;      // RelayDone
   uint8_t detail = 0;        // DeviceError
 };
@@ -273,8 +298,18 @@ struct IlluminationStatus {
   uint16_t relay_remaining_ms = 0;
   uint16_t relay_cooldown_ms = 0;
   uint16_t relay_pulses = 0;
+  uint8_t mist_pattern = 0;       // MistPattern of the running mist (0 = none)
+  uint8_t mist_flags = 0;         // MistStatusFlag bits
+  uint16_t mist_remaining_s = 0;  // until the running mist stops by itself
+  uint16_t mist_on_s = 0;         // output ON time of the running (or last) mist
 };
-constexpr size_t kIlluminationStatusSize = 12;
+constexpr size_t kIlluminationStatusSize = 18;
+
+enum class MistStatusFlag : uint8_t {
+  OutputOn = 0x01,   // the mist relay is ON right now
+  LocalMode = 0x02,  // scenes are being driven by the device button (no PC session)
+};
+inline uint8_t u8(MistStatusFlag f) { return static_cast<uint8_t>(f); }
 
 struct DialStatus {
   uint8_t dial_state = 0;

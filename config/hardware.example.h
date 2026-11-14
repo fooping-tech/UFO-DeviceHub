@@ -4,18 +4,44 @@
 // would move an actuator are disabled (-1) until set explicitly.
 #pragma once
 
-// ---------------- Hub (M5ATOM Lite) ----------------
-#define HUB_SERIAL_BAUD 115200
-#define HUB_STATUS_LED_PIN 27  // ATOM Lite built-in SK6812
+// ---------------- Hub (M5AtomS3R, USB to the PC) ----------------
+// The hub shows its status on the AtomS3R screen (system number, channel, PC
+// session, devices online). Built with -DUFO_HUB_DISPLAY=1 (env hub_s1 / hub_s2).
+#define HUB_SERIAL_BAUD 115200   // USB CDC: the value does not matter, kept for USB-UART boards
+#define HUB_STATUS_LED_PIN 27    // only for an ATOM Lite hub (no display): built-in SK6812
 
 // ---------------- Illumination ATOM ----------------
+// ATOM Lite + Atomic PWM Base + Unit 2Relay (the former atom_led_mist setup):
+//   COB tape (warm white, 12V)  Atomic PWM Base, PWM input = G22
+//   WS2811 tape (12V, 70 ICs)   data = G21 (the base's "21" hole)
+//   mist module (5V)            Unit 2Relay RELAY-2, Grove yellow = G32
+//   button                      ATOM built-in, G39
 #define ILLUM_STATUS_LED_PIN 27        // ATOM Lite built-in SK6812
-#define ILLUM_LED_PIN 26               // UNVERIFIED: LED strip data pin (ATOM Grove G26)
-#define ILLUM_LED_COUNT 30             // UNVERIFIED: number of LEDs on the strip
+#define ILLUM_LED_PIN 21               // WS2811 data
+#define ILLUM_LED_COUNT 70             // 14 IC/m x 5 m
+#define ILLUM_LED_CHIPSET WS2811       // FastLED chipset (WS2812B for 5V pixel strips)
+#define ILLUM_LED_COLOR_ORDER GRB      // boot test: red -> green -> blue means the order is right
 #define ILLUM_LED_MAX_BRIGHTNESS 200   // global cap (0-255) for power budget
-// Steam generator relay(s). -1 = not configured -> RELAY_PULSE answers NOT_CONFIGURED.
+// COB tape through the Atomic PWM Base. -1 = no COB tape.
+#define ILLUM_COB_PIN 22
+#define ILLUM_COB_PWM_FREQ 10000
+#define ILLUM_COB_PWM_BITS 10
+#define ILLUM_COB_LEDC_CHANNEL 0       // Arduino-ESP32 2.x only
+#define ILLUM_COB_MAX_BRIGHTNESS 255   // COB cap (0-255); lower it if too bright
+// Mist module relay. -1 = not configured -> SET_MIST answers NOT_CONFIGURED.
+#define ILLUM_MIST_PIN 32
+#define ILLUM_MIST_ACTIVE_HIGH 1       // 1: HIGH = ON (swap if the relay works inverted)
+#define ILLUM_MIST_MAX_S 600           // one mist run lasts at most 10 min (dry-run protection)
+#define ILLUM_MIST_WATCHDOG_MS 1000    // mist forced OFF if loop() stalls this long
+// Device button: local scenes when no PC session. -1 = no button.
+#define ILLUM_BUTTON_PIN 39
+#define ILLUM_LOCAL_CONTROL 1          // 1: short press = next scene
+#define ILLUM_LOCAL_MIST 1             // 1: local scenes run the mist (long press toggles)
+#define ILLUM_LOCAL_BRIGHTNESS 160     // WS2811 brightness of the local scenes
+// Steam generator relay(s) for short game pulses (RELAY_PULSE). -1 = not configured.
+// The other Unit 2Relay channel (Grove white = G26) can be used here.
 #define ILLUM_RELAY_COUNT 1
-#define ILLUM_RELAY_PINS {-1}          // UNVERIFIED: e.g. {32}
+#define ILLUM_RELAY_PINS {-1}          // UNVERIFIED: e.g. {26}
 #define ILLUM_RELAY_ACTIVE_HIGH {1}    // 1: HIGH = ON, 0: LOW = ON (relay module polarity)
 #define ILLUM_RELAY_MAX_ON_MS 3000     // hard limit for one pulse
 #define ILLUM_RELAY_COOLDOWN_MS 2000   // re-fire prohibited after a pulse ends

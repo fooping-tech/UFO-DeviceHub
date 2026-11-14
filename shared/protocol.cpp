@@ -110,13 +110,13 @@ size_t encodePacket(const Packet& p, uint8_t* out, size_t cap) {
   return w.ok() ? w.size() : 0;
 }
 
-DecodeError decodePacket(const uint8_t* in, size_t len, Packet& out) {
+DecodeError decodePacket(const uint8_t* in, size_t len, Packet& out, uint16_t magic) {
   if (in == nullptr || len < kHeaderSize) return DecodeError::TooShort;
   if (len > kMaxPacketSize) return DecodeError::TooLong;
   Reader r(in, len);
   Header h;
   h.magic = r.u16();
-  if (h.magic != kMagic) return DecodeError::BadMagic;
+  if (h.magic != magic) return DecodeError::BadMagic;
   h.version = r.u8();
   if (h.version != kProtocolVersion) return DecodeError::BadVersion;
   h.source = r.u8();

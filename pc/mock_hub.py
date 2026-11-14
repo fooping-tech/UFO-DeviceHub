@@ -37,6 +37,9 @@ class MockConfig:
     servo_hold_ms: int = 1500
     servo_settle_ms: int = 600
     effect_default_ms: int = 1000
+    mist_max_s: int = 600
+    system_id: int = 1
+    channel: int = 1
     tick: float = 0.005
 
 
@@ -126,6 +129,30 @@ class MockIllumination(MockDevice):
         self.relay_until = 0
         self.cooldown_until = 0
         self.relay_pulses = 0
+        self.mist_pattern = "OFF"
+        self.mist_started = 0
+        self.mist_until = 0
+        self.mist_on_ms = 0
+        self.mist_last = 0
+
+    PATTERN = {"CONTINUOUS": (1, 1), "BREATH": (14000, 8000), "PUFF": (12000, 3000)}
+
+    def mist_output(self, now: int) -> bool:
+        if self.mist_pattern == "OFF":
+            return False
+        period, on = self.PATTERN[self.mist_pattern]
+        return (now - self.mist_started) % period < on
+
+    def mist_stop(self, now: int, reason: P.RelayEndReason) -> None:
+        if self.mist_pattern != "OFF":
+            self.mist_tick(now)
+            self.mist_pattern = "OFF"
+            self.emit("MIST_DONE", on_s=self.mist_on_ms // 1000, reason=int(reason))
+
+    def mist_tick(self, now: int) -> None:
+        if self.mist_pattern != "OFF" and self.mist_output(self.mist_last):
+            self.mist_on_ms += now - self.mist_last
+        self.mist_last = now
 
     def relay_off(self, now: int, reason: P.RelayEndReason) -> None:
         if self.relay_on:
@@ -137,6 +164,7 @@ class MockIllumination(MockDevice):
         now = _ms()
         if name == "STOP_ALL":
             self.relay_off(now, P.RelayEndReason.SAFETY)
+            self.mist_stop(now, P.RelayEndReason.SAFETY)
             self.effect = None
             return "ACCEPTED", False
         if name == "SET_MODE":
@@ -169,6 +197,19 @@ class MockIllumination(MockDevice):
             self.relay_on, self.relay_on_at, self.relay_until = True, now, now + d
             self.relay_pulses += 1
             return "ACCEPTED", clamped
+        if name == "SET_MIST":
+            if p["pattern"] == "OFF":
+                self.mist_stop(now, P.RelayEndReason.OFF_COMMAND)
+                return "ACCEPTED", False
+            if not self.online:
+                return "REJECTED_STATE", False
+            d = p["duration_s"] or self.hub.cfg.mist_max_s
+            clamped = d > self.hub.cfg.mist_max_s
+            d = min(d, self.hub.cfg.mist_max_s)
+            self.mist_tick(now)
+            self.mist_pattern, self.mist_started, self.mist_until = p["pattern"], now, now + d * 1000
+            self.mist_on_ms, self.mist_last = 0, now
+            return "ACCEPTED", clamped
         if name == "RELAY_OFF":
             if p["relay_id"] not in (0, 255):
                 return "INVALID_PARAMS", False
@@ -179,21 +220,30 @@ class MockIllumination(MockDevice):
     def on_session_changed(self, s: int) -> None:
         super().on_session_changed(s)
         self.relay_off(_ms(), P.RelayEndReason.SAFETY)
+        self.mist_stop(_ms(), P.RelayEndReason.SAFETY)
         self.effect = None
         if s == 0:
             self.light_mode = "IDLE"
 
     def on_link_lost(self) -> None:
         self.relay_off(_ms(), P.RelayEndReason.SAFETY)
+        self.mist_stop(_ms(), P.RelayEndReason.SAFETY)
 
     def tick(self, now: int) -> None:
         if self.relay_on and now >= self.relay_until:
             self.relay_off(now, P.RelayEndReason.COMPLETED)
         if self.effect and now >= self.effect_until:
             self.effect = None
+        self.mist_tick(now)
+        if self.mist_pattern != "OFF" and now >= self.mist_until:
+            self.mist_stop(now, P.RelayEndReason.COMPLETED)
 
     def state(self) -> str:
-        return "RELAY_ACTIVE" if self.relay_on else ("EFFECT" if self.effect else "NORMAL")
+        if self.relay_on:
+            return "RELAY_ACTIVE"
+        if self.mist_pattern != "OFF":
+            return "MIST_ACTIVE"
+        return "EFFECT" if self.effect else "NORMAL"
 
     def status(self) -> dict:
         s = super().status()
@@ -203,6 +253,11 @@ class MockIllumination(MockDevice):
             active_effect=self.effect or "NONE",
             relay_on_mask=1 if self.relay_on else 0,
             relay_pulses=self.relay_pulses,
+            mist_pattern=self.mist_pattern,
+            mist_on=self.mist_output(_ms()),
+            local_mode=False,
+            mist_remaining_s=max(0, (self.mist_until - _ms() + 999) // 1000) if self.mist_pattern != "OFF" else 0,
+            mist_on_s=self.mist_on_ms // 1000,
         )
         return s
 
@@ -440,7 +495,8 @@ class MockHub:
             self._outbox.clear()
             for d in self.devices.values():
                 d.set_session(0)
-            self._emit_line({"type": "BOOT", "protocol_version": 1, "fw": "mock", "hub_mac": "02:00:00:00:00:01"})
+            self._emit_line({"type": "BOOT", "protocol_version": 1, "fw": "mock", "hub_mac": "02:00:00:00:00:01",
+                             "system_id": self.cfg.system_id, "channel": self.cfg.channel})
 
     # ---- hub behaviour -------------------------------------------------------
     def _emit_line(self, msg: dict) -> None:
@@ -507,10 +563,16 @@ class MockHub:
                 if not isinstance(s, int) or s <= 0:
                     self._emit_line({"type": "ERROR", "code": "BAD_REQUEST"})
                     return
+                sys_id = m.get("system_id")
+                if sys_id is not None and sys_id != self.cfg.system_id:
+                    self._emit_line({"type": "ERROR", "code": "SYSTEM_MISMATCH",
+                                     "detail": f"this hub is system {self.cfg.system_id}"})
+                    return
                 self._set_session(s)
                 self._emit_line(
                     {"type": "HELLO_ACK", "protocol_version": 1, "session_id": s, "fw": "mock", "hub_id": 1,
-                     "hub_mac": "02:00:00:00:00:01", "channel": 1, "example_keys": False, "example_devices": True}
+                     "hub_mac": "02:00:00:00:00:01", "channel": self.cfg.channel, "system_id": self.cfg.system_id,
+                     "system_check": "ok", "example_keys": False, "example_devices": True}
                 )
             elif t == "BYE":
                 self._close_session("pc_request")

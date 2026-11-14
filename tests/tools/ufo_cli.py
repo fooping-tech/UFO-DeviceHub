@@ -1,6 +1,6 @@
 """Manual operation / on-site diagnostics for the UFO device hub.
 
-    python3 tests/tools/ufo_cli.py [--port auto|/dev/cu.usbserial-XXXX|mock] <command>
+    python3 tests/tools/ufo_cli.py [--system 1|2] [--port auto|/dev/cu.usbmodemXXXX|mock] <command>
 
 Commands
   devices                       list devices (online, rtt, session)
@@ -9,6 +9,7 @@ Commands
   light <MODE> [brightness]     SET_LIGHT_MODE
   effect <EFFECT> [ms]          TRIGGER_EFFECT
   steam <ms>                    RELAY_PULSE (needs a configured relay pin)
+  mist <PATTERN> [seconds]      SET_MIST: OFF | CONTINUOUS | BREATH | PUFF
   game <dev>                    SET_MODE GAME + ARM_RECEIVER
   release <dev>                 RELEASE_BALL (waits for RELEASE_DONE)
   stop                          STOP_ALL on every device
@@ -16,6 +17,8 @@ Commands
   probe [seconds] [dev]         latency / loss measurement with GET_STATUS commands
 
 `--port mock` runs against pc.mock_hub (no hardware).
+`--system N` only attaches to the hub of UFO system N (two systems in one venue);
+with --port auto the other serial ports are tried when a hub answers SYSTEM_MISMATCH.
 """
 
 import argparse
@@ -41,6 +44,7 @@ def dev(s: str) -> int:
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", default="auto")
+    ap.add_argument("--system", type=int, default=None, help="UFO system id (1, 2)")
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("cmd")
     ap.add_argument("args", nargs="*")
@@ -49,9 +53,9 @@ def main() -> int:
 
     if a.port == "mock":
         from pc.mock_hub import MockHub
-        gw = DeviceGateway(transport=MockHub())
+        gw = DeviceGateway(transport=MockHub(), system_id=a.system)
     else:
-        gw = DeviceGateway(port=a.port)
+        gw = DeviceGateway(port=a.port, system_id=a.system)
     events = gw.event_queue()
     if not gw.connect(timeout=5.0):
         print("hub not reachable", file=sys.stderr)
@@ -72,6 +76,8 @@ def main() -> int:
             print(gw.trigger_effect(args[0], duration_ms=int(args[1]) if len(args) > 1 else 0))
         elif c == "steam":
             print(gw.relay_pulse(int(args[0])))
+        elif c == "mist":
+            print(gw.set_mist(args[0], duration_s=int(args[1]) if len(args) > 1 else 0))
         elif c == "game":
             d = dev(args[0])
             print(gw.set_mode(d, "GAME"))
