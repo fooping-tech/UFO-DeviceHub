@@ -346,3 +346,49 @@ def test_gateway_refuses_hub_of_another_system():
     finally:
         gw.disconnect()
         hub.stop()
+
+
+class _ChattyThenHub:
+    """Auto-detect: the first port is a node printing its debug log (not a hub),
+    the next one is the hub."""
+
+    def __init__(self, hub):
+        self.hub = hub
+        self.on_hub = False
+        self.rejected = 0
+
+    def reject_current(self):
+        self.rejected += 1
+        self.on_hub = True
+
+    def open(self):
+        if self.on_hub:
+            self.hub.open()
+
+    def close(self):
+        if self.on_hub:
+            self.hub.close()
+
+    def write_line(self, line):
+        if self.on_hub:
+            self.hub.write_line(line)
+
+    def read_line(self, timeout):
+        if self.on_hub:
+            return self.hub.read_line(timeout)
+        import time as _t
+
+        _t.sleep(min(timeout, 0.01))
+        return "[illum] led frame ok"  # plain log text, never a protocol line
+
+
+def test_auto_detect_skips_port_that_is_not_a_hub():
+    hub = MockHub(MockConfig(system_id=1))
+    t = _ChattyThenHub(hub)
+    gw = DeviceGateway(transport=t, heartbeat_interval=0.1, hub_timeout=0.4, reconnect_interval=0.05, system_id=1)
+    try:
+        assert gw.connect(timeout=3.0)
+        assert t.rejected == 1 and gw.hub_info["system_id"] == 1
+    finally:
+        gw.disconnect()
+        hub.stop()

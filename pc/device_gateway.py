@@ -226,6 +226,7 @@ class DeviceGateway:
         self._last_status: dict[int, dict] = {}
         self._last_rx = 0.0
         self._last_hb = 0.0
+        self._handshake_since = 0.0  # port opened / session lost: HELLO_ACK expected within hub_timeout
         self.hub_info: dict = {}
         self.stats = {"events": 0, "duplicate_events": 0, "stale_events": 0, "reconnects": 0, "bad_lines": 0}
 
@@ -497,6 +498,8 @@ class DeviceGateway:
 
     def _new_session(self) -> None:
         with self._lock:
+            if self._session_ready.is_set():
+                self._handshake_since = time.monotonic()
             self._session_ready.clear()
             self._session_id = random.randint(1, 0xFFFFFFFF)
             self._next_command_id = random.randint(1, 0x3FFFFFFF)
@@ -540,7 +543,7 @@ class DeviceGateway:
                 try:
                     self._transport.open()
                     self._open = True
-                    self._last_rx = time.monotonic()
+                    self._last_rx = self._handshake_since = time.monotonic()
                     self._new_session()
                     self._last_hb = time.monotonic()
                 except (TransportError, OSError) as e:
@@ -550,14 +553,19 @@ class DeviceGateway:
             try:
                 line = self._transport.read_line(0.05)
                 now = time.monotonic()
-                if line:
-                    self._last_rx = now
-                    self._handle_line(line)
+                if line and self._handle_line(line):
+                    self._last_rx = now  # only hub protocol lines: a node's debug log is not a hub
                 if now - self._last_hb >= self.heartbeat_interval:
                     self._last_hb = now
                     self._write({"type": "HEARTBEAT"})
                 if not self._session_ready.is_set() and now - self._hello_sent_at > 1.0:
                     self._new_session()  # HELLO lost / hub still booting: retry
+                if not self._session_ready.is_set() and now - self._handshake_since > self.hub_timeout:
+                    # auto mode: the port answers but is not a hub (e.g. an ATOM or M5Dial on USB)
+                    reject = getattr(self._transport, "reject_current", None)
+                    if reject:
+                        reject()
+                    raise TransportError("no hub handshake on this port")
                 if now - self._last_rx > self.hub_timeout:
                     raise TransportError("hub silent")
             except (TransportError, OSError) as e:
@@ -573,19 +581,21 @@ class DeviceGateway:
         self._session_ready.clear()
         self._fail_all_pending("DISCONNECTED")
 
-    def _handle_line(self, line: str) -> None:
+    def _handle_line(self, line: str) -> bool:
+        """Returns False for lines that are not hub protocol messages."""
         try:
             msg = P.decode_line(line)
         except ProtocolError as e:
             self.stats["bad_lines"] += 1
             log.debug("ignoring line %r: %s", line[:80], e)
-            return
+            return False
         t = msg["type"]
         handler = getattr(self, f"_on_{t.lower()}", None)
         if handler:
             handler(msg)
         else:
             log.debug("unhandled %s", t)
+        return True
 
     def _on_hello_ack(self, m: dict) -> None:
         if m.get("session_id") != self._session_id:
