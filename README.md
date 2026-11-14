@@ -29,7 +29,16 @@ pio run -e illumination -t upload        # Illumination ATOM (ID 0x10)
 pio run -e m5dial_1     -t upload        # M5Dial #1 (ID 0x20)
 pio run -e m5dial_2     -t upload        # M5Dial #2 (ID 0x21)
 pio run -e noise        -t upload        # 試験用: 他展示を模擬するノイズ送信機
+pio run -e illum_mist    -t upload       # 単体 Illumination 演出（ATOM Lite、通信なし）
+pio run -e illum_mist_s3 -t upload       # 同上（AtomS3 Lite）
 ```
+
+### 単体 Illumination 演出（atom_led_mist）
+
+`firmware/atom_led_mist/atom_led_mist.ino` は Hub / ESP-NOW を使わずに単体で動く照明・噴霧の演出スケッチ。
+COB テープ（Atomic PWM Base）、WS2811 テープ、噴霧モジュール（Unit 2Relay）をボタンでシーン切替する。
+Arduino IDE でもこのファイルをそのまま開いて書き込める（ライブラリ: FastLED）。
+ピン・操作・安全設定は [docs/hardware.md](docs/hardware.md#単体-illumination-演出atom_led_mist) を参照。
 
 （`pio` が PATH にない場合は `~/.platformio/penv/bin/pio`）
 
@@ -63,7 +72,7 @@ gw.relay_pulse(1500)                     # 蒸気（最大 3000 ms）
 
 ```
 shared/        共通プロトコル（パケット、payload、信頼性、子機コア、ESP-NOW、LED 演出）
-firmware/      hub/, illumination/, m5dial/
+firmware/      hub/, illumination/, m5dial/, atom_led_mist/（単体 Illumination 演出）
 config/        *.example.h（実設定はコピーして作成）
 pc/            protocol.py, device_gateway.py, mock_hub.py
 tests/         firmware/（Unity, native）, protocol/, integration/（pytest）, tools/

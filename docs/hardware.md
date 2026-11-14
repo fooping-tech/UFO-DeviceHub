@@ -109,3 +109,35 @@ NeoGacha との違い:
 | CUSTOM | `color`。speed=0 で点灯、>0 で呼吸 |
 
 `transition_ms` でモード切替をクロスフェード。演出（既定時間）: GAME_START 1500, ARM_MOVE 600, ARM_DESCEND 1200, CATCH 800, BALL_RECEIVED 1000, BALL_RELEASED 1000, SCORE 1500, GAME_CLEAR 4000, GAME_OVER 2500 ms（最大 10000 ms）。
+
+## 単体 Illumination 演出（atom_led_mist）
+
+`firmware/atom_led_mist/atom_led_mist.ino`。Hub / ESP-NOW / PC を使わず、本体ボタンだけで動く。
+上の Illumination ATOM（Device ID 0x10）とは別ファームで、`config/*.h` は使わない（設定はスケッチ先頭の定数）。
+
+| 項目 | ATOM Lite | AtomS3 Lite | 備考 |
+|---|---|---|---|
+| COB テープ PWM（Atomic PWM Base） | G22 | G5 | 電球色 12V。10 kHz / 10 bit |
+| WS2811 データ | G21 | G39 | 70 IC（14 IC/m × 5 m）、GRB |
+| 噴霧リレー（Unit 2Relay の RELAY-2） | G32 | G2 | HIGH = ON（逆なら `RELAY_ON`/`RELAY_OFF` を入れ替え） |
+| ボタン | G39 | G41 | |
+
+操作: 短押しで次のシーン、長押し（約 0.8 秒）で噴霧の ON/OFF（全体が緑 = 噴霧 ON、赤 = 光のみ）。
+起動時に赤 → 緑 → 青と全体が光れば WS2811 の色順は正しい。
+
+| シーン | COB | WS2811 | 噴霧 |
+|---|---|---|---|
+| off | 消灯 | 消灯 | なし |
+| aurora mist | ゆったり明暗 | オーロラ | 連続 |
+| storm cloud | 稲妻で明るく | 雷雲 + 稲妻 | 連続 |
+| campfire smoke | ロウソクのゆらぎ | 炎（Fire2012） | 連続 |
+| breathing mist | 霧と連動 | 霧と連動して明暗 | 8 秒出す / 6 秒休む |
+| rainbow mist | 一定の暖色 | 虹 | 連続 |
+| magic puff | 霧と連動 | 霧が出るたびキラキラ | 3 秒出す / 9 秒休む |
+| night | ゆっくり呼吸 | 消灯 | 8 秒出す / 6 秒休む |
+
+噴霧の安全仕様（ゲーム用 Illumination のリレーとは別の考え方）:
+
+* 起動時は必ず噴霧 OFF。
+* 1 シーンで噴霧できる合計時間は `MIST_MAX_ON_MS`（10 分）。超えると自動停止し、シーン切替か長押しで再カウント。
+* ゲーム用の「1 回最大 3000 ms・クールダウン・ウォッチドッグ」は適用されない。蒸気発生器など長時間 ON が危険な機器には使わないこと。
