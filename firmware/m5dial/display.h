@@ -27,15 +27,35 @@ struct DisplayModel {
   bool operator==(const DisplayModel& o) const;
 };
 
+// Settings (hardware test) screen.
+enum class SettingsItem : uint8_t { Release, Angle, Led, Switch, Exit, Count };
+const char* settingsItemLabel(SettingsItem i);
+
+struct SettingsModel {
+  SettingsItem item = SettingsItem::Release;
+  bool adjusting = false;     // ANGLE: the dial turns the servo
+  uint8_t servo_deg = 0;
+  bool servo_busy = false;
+  const char* led_pattern = "";
+  bool switch_on = false;
+  uint16_t switch_count = 0;
+  int8_t receiver_pin = -1;
+  bool operator==(const SettingsModel& o) const;
+};
+
 class DialDisplay {
  public:
   void begin(const char* mac);
   void update(const DisplayModel& m);
+  void updateSettings(const SettingsModel& s);
 
  private:
   void draw(const DisplayModel& m);
+  void drawSettings(const SettingsModel& s);
   DisplayModel last_;
+  SettingsModel last_settings_;
   bool drawn_ = false;
+  bool settings_drawn_ = false;
   const char* mac_ = "";
 };
 

@@ -13,7 +13,7 @@ const char* const kMistPatterns[] = {"OFF", "CONTINUOUS", "BREATH", "PUFF"};
 const char* const kEffects[] = {"NONE",          "GAME_START", "ARM_MOVE", "ARM_DESCEND", "CATCH",
                                 "BALL_RECEIVED", "BALL_RELEASED", "SCORE", "GAME_CLEAR", "GAME_OVER"};
 const char* const kDialStates[] = {"DISABLED",  "READY",     "ARMED",    "BALL_DETECTED",
-                                   "RELEASING", "RETURNING", "COMPLETE", "ERROR"};
+                                   "RELEASING", "RETURNING", "COMPLETE", "ERROR",    "SETTINGS"};
 const char* const kOpModes[] = {"STANDBY", "GAME"};
 
 template <size_t N>
@@ -115,7 +115,7 @@ const char* mistPatternName(uint8_t p) {
   return p < sizeof(kMistPatterns) / sizeof(kMistPatterns[0]) ? kMistPatterns[p] : "UNKNOWN";
 }
 const char* effectName(uint8_t e) { return e < 10 ? kEffects[e] : "UNKNOWN"; }
-const char* dialStateName(uint8_t s) { return s < 8 ? kDialStates[s] : "UNKNOWN"; }
+const char* dialStateName(uint8_t s) { return s < 9 ? kDialStates[s] : "UNKNOWN"; }
 const char* illuminationStateName(uint8_t s) {
   switch (static_cast<IlluminationState>(s)) {
     case IlluminationState::Normal: return "NORMAL";

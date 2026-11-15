@@ -58,19 +58,40 @@
 #define DIAL_SERVO_RELEASE_DEG 0
 #define DIAL_SERVO_HOLD_MS 1500
 #define DIAL_SERVO_RETURN_SETTLE_MS 600  // UNVERIFIED: time for the horn to get back to standby
+// Power: the SG90 inrush / stall current (up to ~0.7 A) can brown out the M5Dial.
+// The servo moves in small steps at this speed instead of one 180 deg jump
+// (0 = full speed). Hold / settle times are counted after the ramp ends.
+#define DIAL_SERVO_SLEW_DEG_PER_S 240    // 180 deg in 0.75 s (SG90 full speed ~600 deg/s)
+// Stop the servo pulses this long after it reached standby (0 = keep holding).
+// No holding current / jitter at rest; the next motion re-attaches the servo.
+#define DIAL_SERVO_DETACH_MS 500
+// The first servo move after power up waits this long (radio start-up current).
+#define DIAL_SERVO_BOOT_DELAY_MS 1000
 // 1: on hub link loss, a running release returns to standby immediately.
 // 0: the running sequence finishes normally (hold, then return).
 #define DIAL_LINK_LOSS_ABORT_RELEASE 0
 
-// Ball receiver switch. -1 = not wired yet (use the simulation button).
-#define DIAL_RECEIVER_PIN -1           // UNVERIFIED: e.g. 15 (PORT.A) or 2 (PORT.B)
-#define DIAL_RECEIVER_ACTIVE_LOW 1     // 1: switch pulls to GND when a ball is present
+// Ball receiver switch: PORT.B, the pin next to the LED (G2). Switch ON = ball in.
+// -1 = not wired (use the simulation button).
+#define DIAL_RECEIVER_PIN 2
+#define DIAL_RECEIVER_ACTIVE_LOW 1     // 1: the switch connects the pin to GND (internal pull-up)
 #define DIAL_RECEIVER_PULLUP 1
 #define DIAL_RECEIVER_DEBOUNCE_MS 30
-// 1: the M5Dial button (BtnA) simulates the receiver switch (development only).
-#define DIAL_RECEIVER_SIM_BUTTON 1
+// The capsule only taps the switch (ON for a few ms): an interrupt catches the
+// ON edge and the switch then counts as ON for this long (> DEBOUNCE_MS).
+#define DIAL_RECEIVER_PULSE_STRETCH_MS 80
+// 1: the M5Dial button (BtnA) ALSO simulates the receiver switch (development
+// only; it then cannot open the settings mode).
+#define DIAL_RECEIVER_SIM_BUTTON 0
+
+// Settings mode (hardware test): hold the M5Dial button this long while no game
+// cycle runs. Turn the dial to pick SERVO / ANGLE / LED / SWITCH / EXIT, press to run.
+#define DIAL_SETTINGS_HOLD_MS 2000
+#define DIAL_SETTINGS_TIMEOUT_S 300    // back to normal after this long without input
+#define DIAL_ENCODER_COUNTS_PER_STEP 4 // encoder counts per detent
 
 // NeoGacha front LED (NeoPixel ring on PORT.B G1, 26 pixels in NEOPIXELLED.h).
 #define DIAL_LED_PIN 1
 #define DIAL_LED_COUNT 26
 #define DIAL_LED_BRIGHTNESS 25
+#define DIAL_LED_BRIGHTNESS_SERVO 6    // cap while the servo runs (power budget)

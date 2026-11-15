@@ -23,6 +23,7 @@ const char* dialStateLabel(DialState s) {
     case DialState::Returning: return "RETURN";
     case DialState::Complete: return "DONE";
     case DialState::Error: return "ERROR";
+    case DialState::Settings: return "SETTINGS";
   }
   return "?";
 }
@@ -48,10 +49,86 @@ void DialDisplay::begin(const char* mac) {
 }
 
 void DialDisplay::update(const DisplayModel& m) {
+  settings_drawn_ = false;
   if (drawn_ && m == last_) return;
   last_ = m;
   drawn_ = true;
   draw(m);
+}
+
+bool SettingsModel::operator==(const SettingsModel& o) const {
+  return item == o.item && adjusting == o.adjusting && servo_deg == o.servo_deg && servo_busy == o.servo_busy &&
+         led_pattern == o.led_pattern && switch_on == o.switch_on && switch_count == o.switch_count &&
+         receiver_pin == o.receiver_pin;
+}
+
+const char* settingsItemLabel(SettingsItem i) {
+  switch (i) {
+    case SettingsItem::Release: return "SERVO TEST";
+    case SettingsItem::Angle: return "SERVO ANGLE";
+    case SettingsItem::Led: return "LED TEST";
+    case SettingsItem::Switch: return "SWITCH TEST";
+    case SettingsItem::Exit: return "EXIT";
+    default: return "?";
+  }
+}
+
+void DialDisplay::updateSettings(const SettingsModel& s) {
+  drawn_ = false;  // the normal screen is redrawn on return
+  if (settings_drawn_ && s == last_settings_) return;
+  last_settings_ = s;
+  settings_drawn_ = true;
+  drawSettings(s);
+}
+
+void DialDisplay::drawSettings(const SettingsModel& s) {
+  auto& d = M5Dial.Display;
+  const int cx = d.width() / 2;
+  char buf[48];
+  d.startWrite();
+  d.fillScreen(TFT_NAVY);
+  d.setTextDatum(middle_center);
+  d.setFont(&fonts::Font2);
+  d.setTextColor(TFT_YELLOW);
+  d.drawString("SETTINGS", cx, 30);
+
+  // previous / current / next item
+  const int n = static_cast<int>(SettingsItem::Count);
+  const int cur = static_cast<int>(s.item);
+  d.setTextColor(TFT_DARKGREY);
+  d.drawString(settingsItemLabel(static_cast<SettingsItem>((cur + n - 1) % n)), cx, 58);
+  d.drawString(settingsItemLabel(static_cast<SettingsItem>((cur + 1) % n)), cx, 128);
+  d.setFont(&fonts::Orbitron_Light_24);
+  d.setTextColor(s.adjusting ? TFT_ORANGE : TFT_WHITE);
+  d.drawString(settingsItemLabel(s.item), cx, 92);
+
+  d.setFont(&fonts::Font2);
+  d.setTextColor(TFT_CYAN);
+  switch (s.item) {
+    case SettingsItem::Release: d.drawString(s.servo_busy ? "running..." : "press: release -> back", cx, 156); break;
+    case SettingsItem::Angle:
+      snprintf(buf, sizeof(buf), s.adjusting ? "turn: %u deg  press: done" : "press: adjust (%u deg)", s.servo_deg);
+      d.drawString(buf, cx, 156);
+      break;
+    case SettingsItem::Led:
+      snprintf(buf, sizeof(buf), "%s  press: next", s.led_pattern);
+      d.drawString(buf, cx, 156);
+      break;
+    case SettingsItem::Switch: d.drawString("press: reset count", cx, 156); break;
+    case SettingsItem::Exit: d.drawString("press / hold: exit", cx, 156); break;
+    default: break;
+  }
+
+  d.setTextColor(s.switch_on ? TFT_GREEN : TFT_LIGHTGREY);
+  if (s.receiver_pin >= 0)
+    snprintf(buf, sizeof(buf), "switch G%d %s  x%u", s.receiver_pin, s.switch_on ? "ON" : "off", s.switch_count);
+  else
+    snprintf(buf, sizeof(buf), "switch not wired");
+  d.drawString(buf, cx, 180);
+  d.setTextColor(TFT_LIGHTGREY);
+  snprintf(buf, sizeof(buf), "servo %u deg%s", s.servo_deg, s.servo_busy ? " *" : "");
+  d.drawString(buf, cx, 200);
+  d.endWrite();
 }
 
 void DialDisplay::draw(const DisplayModel& m) {

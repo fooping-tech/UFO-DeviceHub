@@ -99,23 +99,67 @@ NeoGacha `src/M5Dial_Gacha` から確認した値をそのまま初期値にし�
 | 保持時間 | `DIAL_SERVO_HOLD_MS` | 1500 | 同上 |
 | 復帰整定 | `DIAL_SERVO_RETURN_SETTLE_MS` | 600 | **未確認**（新規。復帰完了までの待ち） |
 | 通信断時の排出中動作 | `DIAL_LINK_LOSS_ABORT_RELEASE` | 0（シーケンスを最後まで実行して待機位置へ） | 1 で即待機位置へ |
-| 受取スイッチ GPIO | `DIAL_RECEIVER_PIN` | -1（未配線） | **未確定** |
-| 受取スイッチ極性 | `DIAL_RECEIVER_ACTIVE_LOW`, `DIAL_RECEIVER_PULLUP` | 1, 1 | **未確定** |
+| サーボの速度 | `DIAL_SERVO_SLEW_DEG_PER_S` | 240（180° を 0.75 秒） | 電源対策。0 = 一気に動かす（NeoGacha と同じ） |
+| 停止後のパルス停止 | `DIAL_SERVO_DETACH_MS` | 500 | 電源対策。待機位置に戻ってこの時間後にパルスを止める。0 = 保持し続ける |
+| 起動時のサーボ待ち | `DIAL_SERVO_BOOT_DELAY_MS` | 1000 | 電源対策。無線の起動が済んでから待機位置へ動かす |
+| 受取スイッチ GPIO | `DIAL_RECEIVER_PIN` | 2（PORT.B、LED の隣のピン） | スイッチ ON = ボール投入 |
+| 受取スイッチ極性 | `DIAL_RECEIVER_ACTIVE_LOW`, `DIAL_RECEIVER_PULLUP` | 1, 1（スイッチで GND に落とす、内部プルアップ） | 3.3V 側に繋いだ場合は 0, 0 |
 | デバウンス | `DIAL_RECEIVER_DEBOUNCE_MS` | 30 | |
-| 模擬ボタン | `DIAL_RECEIVER_SIM_BUTTON` | 1（BtnA = 受取スイッチ ON） | **本番では 0 にする** |
+| 模擬ボタン | `DIAL_RECEIVER_SIM_BUTTON` | 0 | 1 にすると BtnA = 受取スイッチ ON（開発用。設定モードは使えなくなる） |
 | 前面 LED | `DIAL_LED_PIN`, `DIAL_LED_COUNT`, `DIAL_LED_BRIGHTNESS` | 1, 26, 25 | NeoGacha `LED_PIN2=1`, `NUM_LEDS 26`, `setbrightness(25)` |
+| サーボ動作中の LED | `DIAL_LED_BRIGHTNESS_SERVO` | 6 | 電源対策。サーボが動いている間は LED を暗くする |
+| 設定モード | `DIAL_SETTINGS_HOLD_MS`, `DIAL_SETTINGS_TIMEOUT_S` | 2000, 300 | ボタン長押し時間 / 無操作で自動終了 |
+| エンコーダ | `DIAL_ENCODER_COUNTS_PER_STEP` | 4 | 1 クリックで項目が 1 つ進まない場合に調整 |
 
 NeoGacha との違い:
 
 * NeoGacha の MODE_STOP / MODE_A はダイヤル回転のたびに 180°/160° を往復していた（攪拌動作）。本システムでは PC の `RELEASE_BALL` 以外でサーボを動かさないため移植していない。
-* 起動時は NeoGacha と同じく attach 後すぐ待機角度 180° を出力する。電源投入時にホーンが待機位置へ動く。
-* サーボはアタッチしたまま（NeoGacha と同じ通電条件）。
+* 起動時は無線の起動から `DIAL_SERVO_BOOT_DELAY_MS` 後に待機角度 180° を出力する。電源投入時にホーンが待機位置へ動く。
+* サーボはゆっくり動かし、待機位置で止まったらパルスを止める（下記の電源対策）。
+
+### サーボの電源対策
+
+SG90 は動き始めと引っかかったときに最大 0.7 A ほど流れ、M5Dial の電源が落ちる（再起動する）ことがある。ファームウェアでは次の対策をしている。
+
+1. **ゆっくり動かす**: 180° を一気に動かさず、`DIAL_SERVO_SLEW_DEG_PER_S`（既定 240°/秒）で少しずつ角度を変える。保持時間・整定時間は移動が終わってから数える。
+2. **止まったらパルスを止める**: 待機位置に戻って `DIAL_SERVO_DETACH_MS` 後にパルスを止める。保持電流と細かい振動がなくなる。次の動作で自動的に再開する。
+3. **ほかの負荷と重ねない**: サーボが動いている間は LED を `DIAL_LED_BRIGHTNESS_SERVO` まで暗くし、スピーカーを鳴らさない。
+4. **起動時に重ねない**: 無線の起動が終わってから `DIAL_SERVO_BOOT_DELAY_MS` 後にサーボを動かす。
+
+それでも落ちる場合は配線側で対策する:
+
+* サーボの電源（赤・茶）の根元に **470〜1000 µF の電解コンデンサ**を入れる。
+* サーボを M5Dial の 5V ではなく**別の 5V 電源**から給電し、GND だけ M5Dial と共通にする。
+* USB 給電の場合は、2 A 以上の電源アダプタとしっかりしたケーブルを使う。
+
+パルスを止めた状態では、ホーンはギアの摩擦だけで止まっている。待機位置でゲートが押し戻されてボールが漏れる場合は `DIAL_SERVO_DETACH_MS 0` にする（保持し続ける）。
+
+### 設定モード（ハードウェアテスト）
+
+ゲームのサイクル中（`WAITING` / `GOT BALL` / 排出中）以外のとき、**本体ボタンを 2 秒長押し**すると設定モードに入る（画面が紺色）。
+
+| 操作 | 動作 |
+|---|---|
+| ダイヤルを回す | 項目を選ぶ |
+| 押す | 選んだ項目を実行 |
+| 2 秒長押し / `EXIT` | 設定モードを終わる（サーボは待機位置へ） |
+
+| 項目 | 内容 |
+|---|---|
+| `SERVO TEST` | 排出シーケンス（排出角度 → 保持 → 待機位置）を 1 回動かす |
+| `SERVO ANGLE` | 押すと調整開始。ダイヤル 1 クリックで 5° 動く。もう一度押すと待機位置へ戻る |
+| `LED TEST` | 押すたびに 赤 → 緑 → 青 → 白 → 虹 → 流れる → 消灯 |
+| `SWITCH TEST` | スイッチの状態と ON 回数を表示し、ON のたびに音が鳴る。押すと回数を 0 に戻す |
+
+* 画面下には、どの項目でもスイッチの状態（`switch G2 ON/off xN`）とサーボ角度を表示する。
+* 設定モード中は PC への `BALL_RECEIVED` などのイベントを送らず、PC からの命令は `STOP_ALL` 以外すべて `REJECTED_STATE` になる。PC には状態 `SETTINGS` が見える。
+* PC の `STOP_ALL` で設定モードは終わる。操作がないまま `DIAL_SETTINGS_TIMEOUT_S`（5 分）たっても終わる。
 
 **サーボの回転方向・角度・保持時間は実機の排出機構で確認するまで変更しないこと。** 確認手順は `docs/test-plan.md` 3.2。
 
 ### 表示
 
-`DIAL #n ID 0xNN` / Hub 接続（`HUB OK`, `NO HUB LINK`, `HUB / NO SESSION`）/ 状態（`STANDBY`, `READY`, `WAITING`=受取待ち, `GOT BALL`=受取済み, `RELEASE`=排出中, `RETURN`, `DONE`, `ERROR`）/ モード・サイクル / スイッチ状態・`[SIM BTN]` / MAC 不一致・エラー・サンプル鍵警告 / 自 MAC。
+`DIAL #n ID 0xNN` / Hub 接続（`HUB OK`, `NO HUB LINK`, `HUB / NO SESSION`）/ 状態（`STANDBY`, `READY`, `WAITING`=受取待ち, `GOT BALL`=受取済み, `RELEASE`=排出中, `RETURN`, `DONE`, `ERROR`, `SETTINGS`）/ モード・サイクル / スイッチ状態・`[SIM BTN]` / MAC 不一致・エラー・サンプル鍵警告 / 自 MAC。
 
 ### 前面 LED（NeoGacha の演出を流用）
 
