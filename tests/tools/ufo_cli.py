@@ -12,10 +12,17 @@ Commands
   mist <PATTERN> [seconds]      SET_MIST: OFF | CONTINUOUS | BREATH | PUFF
   game <dev>                    SET_MODE GAME + ARM_RECEIVER
   release <dev>                 RELEASE_BALL (waits for RELEASE_DONE)
+  dialfx <dev> <EFFECT> [DIR] [#RRGGBB|-] [ms] [PRIORITY] [TARGET]
+                                SET_DIAL_EFFECT: NONE | SOLID | BREATHE | CHASE | COMET | WIPE | FLASH | SPARKLE,
+                                DIR TO_SCREEN | TO_DIAL | NONE, "-" = unit colour,
+                                PRIORITY BACKGROUND | NORMAL | HIGH, TARGET FRONT | TRANSFER | BOTH
+  dialanim <dev> <NAME>         game mode animation (pc/game_mode.py): ATTRACT | INTAKE | RETURN_FLOW | RELEASING | FAULT
+  dialcolor <dev> [#RRGGBB]     SET_DIAL_COLOR (no colour = configured default)
   stop                          STOP_ALL on every device
   monitor                       print every event until Ctrl-C
   probe [seconds] [dev]         latency / loss measurement with GET_STATUS commands
 
+`--trace FILE` appends every command / ACK / event to a JSON Lines trace (pc/trace.py).
 `--port mock` runs against pc.mock_hub (no hardware).
 `--system N` only attaches to the hub of UFO system N (two systems in one venue);
 with --port auto the other serial ports are tried when a hub answers SYSTEM_MISMATCH.
@@ -31,7 +38,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from pc import DeviceGateway, DeviceId  # noqa: E402
+from pc import DeviceGateway, DeviceId, TraceLog  # noqa: E402
+from pc import game_mode  # noqa: E402
 
 ALIASES = {"illum": DeviceId.ILLUMINATION, "illumination": DeviceId.ILLUMINATION,
            "dial1": DeviceId.M5DIAL_1, "dial2": DeviceId.M5DIAL_2}
@@ -45,17 +53,19 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", default="auto")
     ap.add_argument("--system", type=int, default=None, help="UFO system id (1, 2)")
+    ap.add_argument("--trace", default=None, help="append a JSON Lines trace of commands / ACKs / events")
     ap.add_argument("-v", "--verbose", action="store_true")
     ap.add_argument("cmd")
     ap.add_argument("args", nargs="*")
     a = ap.parse_args()
     logging.basicConfig(level=logging.DEBUG if a.verbose else logging.INFO, format="%(asctime)s %(message)s")
 
+    trace = TraceLog(a.trace).record if a.trace else None
     if a.port == "mock":
         from pc.mock_hub import MockHub
-        gw = DeviceGateway(transport=MockHub(), system_id=a.system)
+        gw = DeviceGateway(transport=MockHub(), system_id=a.system, trace=trace)
     else:
-        gw = DeviceGateway(port=a.port, system_id=a.system)
+        gw = DeviceGateway(port=a.port, system_id=a.system, trace=trace)
     events = gw.event_queue()
     if not gw.connect(timeout=5.0):
         print("hub not reachable", file=sys.stderr)
@@ -94,6 +104,15 @@ def main() -> int:
                 print(ev)
                 if ev.name in ("RELEASE_DONE", "RELEASE_FAILED"):
                     break
+        elif c == "dialfx":
+            color = args[3] if len(args) > 3 and args[3] != "-" else None
+            print(gw.set_dial_effect(dev(args[0]), args[1], args[2] if len(args) > 2 else "NONE", color,
+                                     int(args[4]) if len(args) > 4 else 0, args[5] if len(args) > 5 else "NORMAL",
+                                     args[6] if len(args) > 6 else "BOTH"))
+        elif c == "dialanim":
+            print(game_mode.play(gw, dev(args[0]), args[1].upper()))
+        elif c == "dialcolor":
+            print(gw.set_dial_color(dev(args[0]), args[1] if len(args) > 1 else None))
         elif c == "stop":
             for d, r in gw.stop_all().items():
                 print(hex(d), r.result)

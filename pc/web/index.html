@@ -281,13 +281,42 @@ function buildDial(d) {
       <button data-a="DISARM_RECEIVER">解除 (DISARM)</button>
       <button data-a="RELEASE_BALL">排出 (RELEASE)</button>
     </div>
+    <div class="row">
+      <select id="fxEffect${d.id}" title="effect"></select>
+      <select id="fxDir${d.id}" title="direction"></select>
+      <input type="color" id="fxColor${d.id}" value="${d.id === 0x21 ? "#ff00ff" : "#00ffff"}" title="color">
+      <label><input type="checkbox" id="fxUnit${d.id}" checked>号機色</label>
+    </div>
+    <div class="row">
+      <input type="number" id="fxMs${d.id}" value="0" min="0" max="65535" style="width:5.5em" title="duration_ms (0 = 止めるまで)">ms
+      <select id="fxPrio${d.id}" title="priority"></select>
+      <select id="fxTarget${d.id}" title="target"></select>
+      <button data-a="FX">LED 演出</button><button data-a="FX_STOP">演出停止</button>
+      <button data-a="COLOR">号機色に設定</button>
+    </div>
     <div class="kv" id="dKv${d.id}"></div>
     <div class="result" id="dRes${d.id}"></div>
     <details><summary>STATUS (raw)</summary><pre id="dRaw${d.id}">-</pre></details>`;
+  const fill = (id, names, sel) => {
+    $(id + d.id).innerHTML = (names || []).map((n) => `<option${n === sel ? " selected" : ""}>${n}</option>`).join("");
+  };
+  fill("fxEffect", meta.enums.dial_effects, "CHASE");
+  fill("fxDir", meta.enums.dial_directions, "TO_SCREEN");
+  fill("fxPrio", meta.enums.effect_priorities, "NORMAL");
+  fill("fxTarget", meta.enums.dial_led_targets, "BOTH");
   s.querySelectorAll("[data-a]").forEach((bt) => {
     bt.onclick = () => {
       const a = bt.dataset.a;
-      if (a === "GAME" || a === "STANDBY") send(d.id, "SET_MODE", { mode: a }, $("dRes" + d.id));
+      const res = $("dRes" + d.id);
+      if (a === "FX") {
+        const p = { effect: $("fxEffect" + d.id).value, direction: $("fxDir" + d.id).value,
+          duration_ms: +$("fxMs" + d.id).value, priority: $("fxPrio" + d.id).value,
+          target: $("fxTarget" + d.id).value };
+        if (!$("fxUnit" + d.id).checked) p.color = $("fxColor" + d.id).value;
+        send(d.id, "SET_DIAL_EFFECT", p, res);
+      } else if (a === "FX_STOP") send(d.id, "SET_DIAL_EFFECT", { effect: "NONE", priority: "HIGH" }, res);
+      else if (a === "COLOR") send(d.id, "SET_DIAL_COLOR", { color: $("fxColor" + d.id).value }, res);
+      else if (a === "GAME" || a === "STANDBY") send(d.id, "SET_MODE", { mode: a }, $("dRes" + d.id));
       else send(d.id, a, {}, $("dRes" + d.id));
     };
   });
@@ -330,7 +359,9 @@ async function refreshStatus(id) {
       if (!el) return;
       el.textContent = st.dial_state;
       kv($("dKv" + id), [["モード", st.op_mode], ["サイクル", st.cycle], ["受取スイッチ", st.switch_on ? "ON" : "OFF"],
-        ["サーボ", st.servo_deg + "°"], ["排出回数", st.releases]]);
+        ["サーボ", st.servo_deg + "°"], ["排出回数", st.releases],
+        ["LED 演出", `${st.front_effect || "-"} / G15 ${st.transfer_led ? st.transfer_effect : "なし"}`],
+        ["号機色", st.unit_color ? `rgb(${st.unit_color.join(",")})` : "-"]]);
       $("dRaw" + id).textContent = JSON.stringify(st, null, 1);
     }
   } catch (e) { /* offline / timeout: shown in the device table */ }

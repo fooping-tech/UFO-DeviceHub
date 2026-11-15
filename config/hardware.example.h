@@ -95,3 +95,33 @@
 #define DIAL_LED_COUNT 26
 #define DIAL_LED_BRIGHTNESS 25
 #define DIAL_LED_BRIGHTNESS_SERVO 6    // cap while the servo runs (power budget)
+
+// ---- Game mode LEDs (docs/game-mode-interface.md) ----
+// Unit colour: used by the device's own receive / release animation and by PC
+// effects sent without a colour. The game shows the same colour on the screen
+// side. Proposal: dial 1 (0x20, left) cyan, dial 2 (0x21, right) magenta.
+// The PC can change it per session with SET_DIAL_COLOR.
+#define DIAL_UNIT_COLOR_1 {0, 255, 255}
+#define DIAL_UNIT_COLOR_2 {255, 0, 255}
+// Local receive animation: white flash, then the unit colour runs TO_SCREEN.
+#define DIAL_RX_FLASH_MS 150           // UNVERIFIED (proposal, calibrate on the real machine)
+#define DIAL_RX_CHASE_MS 1500          // UNVERIFIED
+// LED arrangement (NeoGacha NEOPIXELLED::level2): the first half of the pixels
+// goes up from the bottom, the second half comes down from the top - two
+// columns. With FOLDED 1 both columns show the same flow. TO_SCREEN runs
+// bottom -> top; set REVERSED 1 if the screen side is at the bottom.
+#define DIAL_LED_FOLDED 1
+#define DIAL_LED_REVERSED 0            // UNVERIFIED: which end faces the screen
+// Second LED on PORT.A G15 (NeoGacha LED_PIN1 / topLed), game mode target
+// TRANSFER. -1 = not used: effects for TRANSFER answer NOT_CONFIGURED, effects
+// for BOTH run on the front LED only.
+#define DIAL_TRANSFER_LED_PIN 15
+#define DIAL_TRANSFER_LED_COUNT 26     // UNVERIFIED: NeoGacha NUM_LEDS; set the real pixel count
+#define DIAL_TRANSFER_LED_FOLDED 1     // UNVERIFIED: same arrangement as the front LED
+#define DIAL_TRANSFER_LED_CHIPSET WS2812B
+#define DIAL_TRANSFER_LED_COLOR_ORDER GRB
+#define DIAL_TRANSFER_LED_REVERSED 0   // UNVERIFIED
+#define DIAL_TRANSFER_LED_BRIGHTNESS 25  // as the front LED (NeoGacha setbrightness(25))
+// 0: the strip is fed from the M5Dial 5 V -> dimmed to DIAL_LED_BRIGHTNESS_SERVO
+//    while the servo runs. 1: own 5 V supply (GND shared) -> never dimmed.
+#define DIAL_TRANSFER_LED_SEPARATE_POWER 0

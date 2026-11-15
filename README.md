@@ -28,7 +28,7 @@ PC (pc/DeviceGateway) --USB JSON Lines--> Hub (M5AtomS3R) --ESP-NOW 暗号化ユ
 ```
 
 * ゲームロジックは PC のみ。Hub は中継・再送・セッション・死活監視、子機は I/O とフェイルセーフだけ。
-* 詳細: [docs/multi-system.md](docs/multi-system.md)（2 システム運用・混信対策）, [docs/protocol.md](docs/protocol.md)（プロトコル・API）, [docs/architecture.md](docs/architecture.md), [docs/hardware.md](docs/hardware.md)（ピン・角度・安全仕様）, [docs/test-plan.md](docs/test-plan.md)（自動テストと実機確認手順）
+* 詳細: [docs/multi-system.md](docs/multi-system.md)（2 システム運用・混信対策）, [docs/protocol.md](docs/protocol.md)（プロトコル・API）, [docs/game-mode-interface.md](docs/game-mode-interface.md)（ゲームモード: 左右 Dial の LED 演出・排出同期の契約）, [docs/architecture.md](docs/architecture.md), [docs/hardware.md](docs/hardware.md)（ピン・角度・安全仕様）, [docs/test-plan.md](docs/test-plan.md)（自動テストと実機確認手順）
 
 ## 同じ会場で 2 システムを動かす（混信対策）
 
@@ -169,7 +169,7 @@ python3 -m pc.web_console --port mock                      # ハードウェア�
 shared/        共通プロトコル（パケット、payload、信頼性、子機コア、ESP-NOW、LED 演出）
 firmware/      hub/（AtomS3R 画面表示を含む）, illumination/（LED・COB・ミスト・ボタン）, m5dial/
 config/        *.example.h（実設定はコピーして作成）
-pc/            protocol.py, device_gateway.py, mock_hub.py, web_console.py + web/（ブラウザ試験画面）
+pc/            protocol.py, device_gateway.py, mock_hub.py, game_mode.py（ゲームモード演出）, trace.py（トレースログ）, web_console.py + web/（ブラウザ試験画面）
 tests/         firmware/（Unity, native）, protocol/, integration/（pytest）, tools/
 docs/
 ```

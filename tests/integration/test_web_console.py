@@ -68,6 +68,22 @@ def test_command_status_and_devices(console):
     assert code == 200
 
 
+def test_dial_effect_from_console(console):
+    code, body = req(console, "/api/meta")
+    en = json.loads(body)["enums"]
+    assert "CHASE" in en["dial_effects"] and en["dial_directions"] == ["NONE", "TO_SCREEN", "TO_DIAL"]
+    assert en["effect_priorities"] == ["BACKGROUND", "NORMAL", "HIGH"] and "BOTH" in en["dial_led_targets"]
+    code, body = req(console, "/api/command", {"device": 0x21, "name": "SET_DIAL_EFFECT", "params": {
+        "effect": "COMET", "direction": "TO_DIAL", "color": "#ff00ff", "duration_ms": 0}})
+    assert code == 200 and json.loads(body)["result"] == "ACCEPTED"
+    code, body = req(console, "/api/status?device=33")
+    st = json.loads(body)
+    assert st["front_effect"] == "COMET" and st["unit_color"] == [255, 0, 255]
+    code, body = req(console, "/api/command", {"device": 0x21, "name": "SET_DIAL_EFFECT",
+                                               "params": {"effect": "CHASE"}})  # no direction
+    assert code == 400 and "direction" in json.loads(body)["error"]
+
+
 def test_invalid_params_rejected_before_sending(console):
     code, body = req(console, "/api/command", {"device": 16, "name": "SET_MIST", "params": {"pattern": "FOG"}})
     assert code == 400 and "pattern" in json.loads(body)["error"]

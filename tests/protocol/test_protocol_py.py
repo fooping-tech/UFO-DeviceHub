@@ -58,6 +58,17 @@ def test_payload_limits():
         ("SET_MIST", {"pattern": "PUFF", "duration_s": 70000}),
         ("SET_LIGHT_MODE", {"mode": 14}),
         ("RELEASE_BALL", {"angle": 90}),  # no wire parameters for angles
+        ("SET_DIAL_EFFECT", {}),
+        ("SET_DIAL_EFFECT", {"effect": "DISCO"}),
+        ("SET_DIAL_EFFECT", {"effect": "CHASE"}),  # directional effect without a direction
+        ("SET_DIAL_EFFECT", {"effect": "COMET", "direction": "NONE"}),
+        ("SET_DIAL_EFFECT", {"effect": "SOLID", "direction": "UP"}),
+        ("SET_DIAL_EFFECT", {"effect": "SOLID", "priority": "URGENT"}),
+        ("SET_DIAL_EFFECT", {"effect": "SOLID", "target": 0}),
+        ("SET_DIAL_EFFECT", {"effect": "SOLID", "target": "LEFT"}),
+        ("SET_DIAL_EFFECT", {"effect": "SOLID", "duration_ms": 70000}),
+        ("SET_DIAL_EFFECT", {"effect": "SOLID", "color": [1, 2]}),
+        ("SET_DIAL_COLOR", {"color": "#12345"}),
         ("SESSION_BEGIN", {}),  # hub only
         ("SELF_DESTRUCT", {}),
     ],
@@ -110,6 +121,7 @@ def test_command_payload_encoding_matches_hub_layout():
                 "TRIGGER_EFFECT": {"effect": "SCORE"},
                 "RELAY_PULSE": {"duration_ms": 1},
                 "SET_MIST": {"pattern": "PUFF"},
+                "SET_DIAL_EFFECT": {"effect": "SOLID"},
             }.get(code.name, {})
             assert len(P.encode_command_payload(code.name, params)) == 1 + n, code.name
 
@@ -131,3 +143,25 @@ def test_system_magic_and_hello():
     assert "system_id" not in P.hello(5)
     with pytest.raises(ProtocolError):
         P.hello(5, 0)
+
+
+def test_set_dial_effect_and_color():
+    assert P.normalize_command("SET_DIAL_EFFECT", {"effect": "chase", "direction": "to_screen"}) == {
+        "effect": "CHASE",
+        "direction": "TO_SCREEN",
+        "duration_ms": 0,
+        "priority": "NORMAL",
+        "target": "BOTH",
+    }  # no colour = the dial's unit colour
+    # code, effect, direction, r, g, b, duration_ms (LE), priority, target
+    assert P.encode_command_payload(
+        "SET_DIAL_EFFECT",
+        {"effect": "COMET", "direction": "TO_DIAL", "color": "#0A0B0C", "duration_ms": 1500, "priority": "HIGH",
+         "target": "TRANSFER"},
+    ).hex() == "2304020a0b0cdc050202"
+    assert P.encode_command_payload("SET_DIAL_EFFECT", {"effect": "NONE"}).hex() == "23000000000000000103"
+    assert P.normalize_command("SET_DIAL_EFFECT", {"effect": P.DialEffect.FLASH, "target": 1})["target"] == "FRONT"
+    assert P.encode_command_payload("SET_DIAL_COLOR", {"color": [255, 0, 255]}).hex() == "24ff00ff"
+    assert P.normalize_command("SET_DIAL_COLOR") == {"color": [0, 0, 0]}  # back to the configured default
+    assert "SET_DIAL_EFFECT" not in P.NO_SESSION_COMMANDS and "SET_DIAL_COLOR" not in P.NO_SESSION_COMMANDS
+    assert (P.DIAL_LEFT, P.DIAL_RIGHT) == (0x20, 0x21)

@@ -17,6 +17,8 @@ const char* commandName(uint8_t code) {
     case CommandCode::ArmReceiver: return "ARM_RECEIVER";
     case CommandCode::DisarmReceiver: return "DISARM_RECEIVER";
     case CommandCode::ReleaseBall: return "RELEASE_BALL";
+    case CommandCode::SetDialEffect: return "SET_DIAL_EFFECT";
+    case CommandCode::SetDialColor: return "SET_DIAL_COLOR";
   }
   return nullptr;
 }
@@ -87,6 +89,8 @@ int commandParamLength(uint8_t code) {
     case CommandCode::RelayPulse: return 3;
     case CommandCode::RelayOff: return 1;
     case CommandCode::SetMist: return 3;
+    case CommandCode::SetDialEffect: return 9;
+    case CommandCode::SetDialColor: return 3;
   }
   return -1;
 }
@@ -152,6 +156,30 @@ size_t encodeSetMist(const SetMistParams& p, uint8_t* out, size_t cap) {
   return w.ok() ? w.size() : 0;
 }
 
+size_t encodeSetDialEffect(const SetDialEffectParams& p, uint8_t* out, size_t cap) {
+  Writer w(out, cap);
+  w.u8(static_cast<uint8_t>(CommandCode::SetDialEffect))
+      .u8(p.effect)
+      .u8(p.direction)
+      .u8(p.r)
+      .u8(p.g)
+      .u8(p.b)
+      .u16(p.duration_ms)
+      .u8(p.priority)
+      .u8(p.target);
+  return w.ok() ? w.size() : 0;
+}
+size_t encodeSetDialColor(const SetDialColorParams& p, uint8_t* out, size_t cap) {
+  Writer w(out, cap);
+  w.u8(static_cast<uint8_t>(CommandCode::SetDialColor)).u8(p.r).u8(p.g).u8(p.b);
+  return w.ok() ? w.size() : 0;
+}
+
+bool dialEffectIsDirectional(uint8_t effect) {
+  return effect == static_cast<uint8_t>(DialEffect::Chase) || effect == static_cast<uint8_t>(DialEffect::Comet) ||
+         effect == static_cast<uint8_t>(DialEffect::Wipe);
+}
+
 bool decodeSetMode(const uint8_t* p, size_t n, OperationMode& m) {
   if (n != 1 || p[0] > static_cast<uint8_t>(OperationMode::Game)) return false;
   m = static_cast<OperationMode>(p[0]);
@@ -199,6 +227,34 @@ bool decodeSetMist(const uint8_t* p, size_t n, SetMistParams& out) {
   out.pattern = r.u8();
   out.duration_s = r.u16();
   return r.ok() && out.pattern <= static_cast<uint8_t>(MistPattern::Puff);
+}
+
+bool decodeSetDialEffect(const uint8_t* p, size_t n, SetDialEffectParams& out) {
+  if (n != 9) return false;
+  Reader r(p, n);
+  out.effect = r.u8();
+  out.direction = r.u8();
+  out.r = r.u8();
+  out.g = r.u8();
+  out.b = r.u8();
+  out.duration_ms = r.u16();
+  out.priority = r.u8();
+  out.target = r.u8();
+  if (!r.ok() || !r.atEnd()) return false;
+  if (out.effect > static_cast<uint8_t>(DialEffect::Sparkle)) return false;
+  if (out.direction > static_cast<uint8_t>(DialDirection::ToDial)) return false;
+  if (out.priority > static_cast<uint8_t>(EffectPriority::High)) return false;
+  if (out.target == 0 || out.target > static_cast<uint8_t>(DialLedTarget::Both)) return false;
+  if (dialEffectIsDirectional(out.effect) && out.direction == static_cast<uint8_t>(DialDirection::None))
+    return false;
+  return true;
+}
+bool decodeSetDialColor(const uint8_t* p, size_t n, SetDialColorParams& out) {
+  if (n != 3) return false;
+  out.r = p[0];
+  out.g = p[1];
+  out.b = p[2];
+  return true;
 }
 
 size_t encodeEvent(const EventData& e, uint8_t* out, size_t cap) {
@@ -326,7 +382,13 @@ size_t encodeStatus(const StatusCommon& c, const IlluminationStatus* il, const D
         .u8(dl->servo_deg)
         .u16(dl->releases)
         .u32(dl->last_release_command)
-        .u8(dl->sim_button);
+        .u8(dl->sim_button)
+        .u8(dl->front_effect)
+        .u8(dl->transfer_effect)
+        .u8(dl->led_flags)
+        .u8(dl->color_r)
+        .u8(dl->color_g)
+        .u8(dl->color_b);
   } else {
     return 0;
   }
@@ -366,6 +428,14 @@ bool decodeStatus(const uint8_t* in, size_t len, StatusCommon& c, IlluminationSt
     dl.releases = r.u16();
     dl.last_release_command = r.u32();
     dl.sim_button = r.u8();
+    if (len != kStatusCommonSize + kDialStatusSizeV1) {  // firmware >= 0.3
+      dl.front_effect = r.u8();
+      dl.transfer_effect = r.u8();
+      dl.led_flags = r.u8();
+      dl.color_r = r.u8();
+      dl.color_g = r.u8();
+      dl.color_b = r.u8();
+    }
   } else {
     return false;
   }

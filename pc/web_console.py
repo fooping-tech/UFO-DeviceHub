@@ -72,6 +72,10 @@ def enums() -> dict:
         "light_modes": [m.name for m in P.LightMode],
         "effects": [e.name for e in P.EffectId if e != P.EffectId.NONE],
         "mist_patterns": [m.name for m in P.MistPattern],
+        "dial_effects": [e.name for e in P.DialEffect],
+        "dial_directions": [d.name for d in P.DialDirection],
+        "effect_priorities": [p.name for p in P.EffectPriority],
+        "dial_led_targets": [t.name for t in P.DialLedTarget],
         "devices": [{"id": int(d), "name": d.name} for d in P.DeviceId if d != P.DeviceId.HUB],
     }
 

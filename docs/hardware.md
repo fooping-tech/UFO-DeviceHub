@@ -110,6 +110,12 @@ NeoGacha `src/M5Dial_Gacha` から確認した値をそのまま初期値にし�
 | サーボ動作中の LED | `DIAL_LED_BRIGHTNESS_SERVO` | 6 | 電源対策。サーボが動いている間は LED を暗くする |
 | 設定モード | `DIAL_SETTINGS_HOLD_MS`, `DIAL_SETTINGS_TIMEOUT_S` | 2000, 300 | ボタン長押し時間 / 無操作で自動終了 |
 | エンコーダ | `DIAL_ENCODER_COUNTS_PER_STEP` | 4 | 1 クリックで項目が 1 つ進まない場合に調整 |
+| 号機色 | `DIAL_UNIT_COLOR_1`, `DIAL_UNIT_COLOR_2` | `{0,255,255}`（シアン）, `{255,0,255}`（マゼンタ） | 初期提案色。PC の `SET_DIAL_COLOR` でセッション中だけ変更できる |
+| 受取時のローカル発光 | `DIAL_RX_FLASH_MS`, `DIAL_RX_CHASE_MS` | 150, 1500 | **未確認**（提案値）。白フラッシュ → 号機色が画面方向へ |
+| LED の並び | `DIAL_LED_FOLDED`, `DIAL_LED_REVERSED` | 1, 0 | NeoGacha `level2()` のとおり、前半の画素は下から上へ、後半は上から下へ並ぶ 2 列。REVERSED は **未確認**（画面側が下なら 1） |
+| 2 本目の LED | `DIAL_TRANSFER_LED_PIN`, `DIAL_TRANSFER_LED_COUNT` | 15, 26 | NeoGacha `LED_PIN1 15`（topLed）。**LED 数は未確認**（NeoGacha の `NUM_LEDS` を仮置き）。-1 で使わない |
+| 2 本目の並び・種類・輝度 | `DIAL_TRANSFER_LED_FOLDED`, `_REVERSED`, `_CHIPSET`, `_COLOR_ORDER`, `_BRIGHTNESS` | 1, 0, WS2812B, GRB, 25 | **未確認** |
+| 2 本目の電源 | `DIAL_TRANSFER_LED_SEPARATE_POWER` | 0 | 0 = M5Dial 給電（サーボ動作中は減光）。別電源にしたら 1 |
 
 NeoGacha との違い:
 
@@ -161,17 +167,23 @@ SG90 は動き始めと引っかかったときに最大 0.7 A ほど流れ、M5
 
 `DIAL #n ID 0xNN` / Hub 接続（`HUB OK`, `NO HUB LINK`, `HUB / NO SESSION`）/ 状態（`STANDBY`, `READY`, `WAITING`=受取待ち, `GOT BALL`=受取済み, `RELEASE`=排出中, `RETURN`, `DONE`, `ERROR`, `SETTINGS`）/ モード・サイクル / スイッチ状態・`[SIM BTN]` / MAC 不一致・エラー・サンプル鍵警告 / 自 MAC。
 
-### 前面 LED（NeoGacha の演出を流用）
+### LED（G1 の前面 LED と G15 の LED、ゲームモード）
 
-| 状態 | 演出 |
+契約（演出 ID・優先順位・同期点・LED の並びと向き・Illumination 流用の検討）は [game-mode-interface.md](game-mode-interface.md)。
+
+| 状態 | 前面 LED（G1）の表示（PC 演出がないとき） |
 |---|---|
 | DISABLED | pacifica（NeoGacha MODE_STOP） |
 | READY | 白のゆっくり呼吸 |
-| ARMED | シアンのチェイス |
-| BALL_DETECTED | cylon（NeoGacha `clyon()` を非ブロッキング化） |
-| RELEASING / RETURNING | 高速レインボー |
+| ARMED | 号機色のチェイス |
+| BALL_DETECTED | 白フラッシュ → 号機色が画面方向へ流れる → 号機色の呼吸 |
+| RELEASING / RETURNING | 号機色が実機方向へ流れる |
 | COMPLETE | フェードアウト（NeoGacha `fade()`） |
 | Hub 通信断 | 赤の呼吸 |
+
+* PC は `SET_DIAL_EFFECT` で 2 系統の LED に演出を出せる。G15 の LED は、受取・排出のアニメーションと PC 演出のときだけ光る（それ以外は消灯）。ボール検出、排出終了、`STOP_ALL`、セッション終了、通信断で Dial が自分で止める。
+* G15 の LED は NeoGacha では点灯させていなかった。2 系統を同時に光らせたときの電流は**未確認**（サーボ動作中は 2 系統とも減光する）。
+* サーボ動作中は PC 演出も `DIAL_LED_BRIGHTNESS_SERVO` まで暗くなる（電源対策を優先）。
 
 ## 照明モード・演出（Illumination）
 

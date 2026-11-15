@@ -170,6 +170,42 @@
    "system_id": 2
   },
   {
+   "name": "set_dial_effect_to_screen",
+   "source": 1,
+   "destination": 32,
+   "message_type": 1,
+   "sequence": 18,
+   "session_id": 2712847316,
+   "command_id": 1008,
+   "payload_hex": "23030100ffffdc050103",
+   "hex": "4655010120011200d4c3b2a1f00300000a23030100ffffdc050103",
+   "system_id": 1
+  },
+  {
+   "name": "set_dial_effect_to_dial_strip",
+   "source": 1,
+   "destination": 33,
+   "message_type": 1,
+   "sequence": 19,
+   "session_id": 2712847316,
+   "command_id": 1009,
+   "payload_hex": "23040200000000000202",
+   "hex": "4655010121011300d4c3b2a1f10300000a23040200000000000202",
+   "system_id": 1
+  },
+  {
+   "name": "set_dial_color",
+   "source": 1,
+   "destination": 33,
+   "message_type": 1,
+   "sequence": 20,
+   "session_id": 2712847316,
+   "command_id": 1010,
+   "payload_hex": "24ff00ff",
+   "hex": "4655010121011400d4c3b2a1f20300000424ff00ff",
+   "system_id": 1
+  },
+  {
    "name": "hub_heartbeat",
    "source": 1,
    "destination": 16,
