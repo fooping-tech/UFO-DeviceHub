@@ -7,6 +7,10 @@
 //   SET_MODE STANDBY / STOP_ALL / session change --> DISABLED (after any running
 //   servo sequence has returned to standby)
 //
+// SETTINGS (hardware test, entered on the device by a long button press while
+// nothing is running): servo / LED / switch tests. No events are sent, every
+// PC command except STOP_ALL is RejectedState; STOP_ALL leaves SETTINGS.
+//
 // The device never decides game outcomes: it only reports and executes.
 #pragma once
 
@@ -45,6 +49,16 @@ class DialController : public NodeApp {
   uint8_t errorCode() const override { return static_cast<uint8_t>(error_); }
   void fillStatus(IlluminationStatus& il, DialStatus& dl) override;
 
+  // Settings mode (device button)
+  bool enterSettings(uint32_t now);  // false while a game cycle / servo motion is running
+  void exitSettings(uint32_t now);   // servo back to standby, state DISABLED (or ERROR)
+  bool inSettings() const { return state_ == DialState::Settings; }
+  bool settingsReleaseTest(uint32_t now);           // full release sequence, no events
+  bool settingsServoAngle(uint8_t deg, uint32_t now);  // hold the horn at an angle
+  void settingsServoHome(uint32_t now);             // manual angle -> standby
+  uint16_t settingsSwitchCount() const { return settings_switch_count_; }
+  void resetSettingsSwitchCount() { settings_switch_count_ = 0; }
+
   DialState dialState() const { return state_; }
   OperationMode operationMode() const { return op_mode_; }
   uint16_t cycle() const { return cycle_; }
@@ -67,6 +81,8 @@ class DialController : public NodeApp {
   uint32_t last_release_cmd_ = 0;
   bool wait_clear_ = false;  // armed while the switch was already ON
   bool link_up_ = false;
+  uint16_t settings_switch_count_ = 0;
+  bool quiet_motion_ = false;  // the running servo motion is a settings test: no events
 };
 
 }  // namespace ufo

@@ -126,6 +126,7 @@ enum class DialState : uint8_t {
   Returning = 0x05,
   Complete = 0x06,
   Error = 0x07,
+  Settings = 0x08,  // device-side settings / hardware test mode (button long press)
 };
 
 enum class IlluminationState : uint8_t {

@@ -108,12 +108,23 @@ ATOM Lite + Atomic PWM Base + Unit 2Relay。旧 `atom_led_mist` スケッチの�
 
 照明モードに `AURORA, STORM, CAMPFIRE, MIST_GLOW, MAGIC_PUFF, NIGHT` を追加した。詳細は [docs/hardware.md](docs/hardware.md#illumination-atomdevice-id-0x10)。
 
+### M5Dial（ボール受取・排出、NeoGacha ベース）
+
+| 入出力 | ピン | 動作 |
+|---|---|---|
+| SG90 サーボ | G13（PORT.A） | `RELEASE_BALL` で排出 → 待機位置へ。ゆっくり動かし、止まったらパルスを止める（電源が落ちる対策） |
+| NeoPixel リング | G1（PORT.B） | 状態に合わせた演出。サーボ動作中は暗くする |
+| 受取スイッチ | G2（PORT.B、LED の隣） | スイッチ ON = ボール投入（`BALL_RECEIVED`）。GND に落とす配線 |
+| 本体ボタン | — | 2 秒長押しで**設定モード**: サーボ・LED・スイッチのテスト |
+
+設定モードの使い方とサーボの電源対策（配線側の対策を含む）は [docs/hardware.md](docs/hardware.md#設定モードハードウェアテスト)。
+
 （`pio` が PATH にない場合は `~/.platformio/penv/bin/pio`）
 
 ## テスト
 
 ```sh
-pio test -e native                                              # ファームウェアのロジック 74 件
+pio test -e native                                              # ファームウェアのロジック 81 件
 uv run --no-project --with pyserial --with pytest python -m pytest    # Python 105 件（Mock 使用）
 ```
 
