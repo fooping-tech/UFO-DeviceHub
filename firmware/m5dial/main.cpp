@@ -13,6 +13,12 @@
 //     SWITCH TEST  live state + ON count (beep on each ON), press: reset count
 //     EXIT
 //
+// LEDs (game mode, docs/game-mode-interface.md): the front LED (G1) shows the
+// device state; the PC can run SET_DIAL_EFFECT on it and on the second LED on
+// G15 (NeoGacha LED_PIN1 / topLed, DIAL_TRANSFER_LED_PIN). Both are laid out
+// "up from the bottom, then down from the top" (two columns). A detected ball
+// flashes white at once and then runs the unit colour towards the screen.
+//
 // Power: the servo ramps (DIAL_SERVO_SLEW_DEG_PER_S), is released at rest
 // (DIAL_SERVO_DETACH_MS), waits DIAL_SERVO_BOOT_DELAY_MS after power up, and
 // while it runs the LED ring is dimmed and the speaker stays quiet.
@@ -56,6 +62,49 @@
 #endif
 #ifndef DIAL_ENCODER_COUNTS_PER_STEP
 #define DIAL_ENCODER_COUNTS_PER_STEP 4
+#endif
+// Game mode LEDs
+#ifndef DIAL_UNIT_COLOR_1
+#define DIAL_UNIT_COLOR_1 {0, 255, 255}  // dial 1 (0x20, left of the screen): cyan
+#endif
+#ifndef DIAL_UNIT_COLOR_2
+#define DIAL_UNIT_COLOR_2 {255, 0, 255}  // dial 2 (0x21, right of the screen): magenta
+#endif
+#ifndef DIAL_RX_FLASH_MS
+#define DIAL_RX_FLASH_MS 150
+#endif
+#ifndef DIAL_RX_CHASE_MS
+#define DIAL_RX_CHASE_MS 1500
+#endif
+#ifndef DIAL_LED_FOLDED
+#define DIAL_LED_FOLDED 1
+#endif
+#ifndef DIAL_LED_REVERSED
+#define DIAL_LED_REVERSED 0
+#endif
+#ifndef DIAL_TRANSFER_LED_PIN
+#define DIAL_TRANSFER_LED_PIN -1
+#endif
+#ifndef DIAL_TRANSFER_LED_COUNT
+#define DIAL_TRANSFER_LED_COUNT 26
+#endif
+#ifndef DIAL_TRANSFER_LED_FOLDED
+#define DIAL_TRANSFER_LED_FOLDED 1
+#endif
+#ifndef DIAL_TRANSFER_LED_CHIPSET
+#define DIAL_TRANSFER_LED_CHIPSET WS2812B
+#endif
+#ifndef DIAL_TRANSFER_LED_COLOR_ORDER
+#define DIAL_TRANSFER_LED_COLOR_ORDER GRB
+#endif
+#ifndef DIAL_TRANSFER_LED_REVERSED
+#define DIAL_TRANSFER_LED_REVERSED 0
+#endif
+#ifndef DIAL_TRANSFER_LED_BRIGHTNESS
+#define DIAL_TRANSFER_LED_BRIGHTNESS 25
+#endif
+#ifndef DIAL_TRANSFER_LED_SEPARATE_POWER
+#define DIAL_TRANSFER_LED_SEPARATE_POWER 0
 #endif
 
 using namespace ufo;
@@ -124,6 +173,15 @@ DialConfig makeDialConfig() {
   DialConfig c;
   c.abort_release_on_link_loss = DIAL_LINK_LOSS_ABORT_RELEASE != 0;
   c.sim_button = DIAL_RECEIVER_SIM_BUTTON != 0;
+  const uint8_t color1[3] = DIAL_UNIT_COLOR_1;
+  const uint8_t color2[3] = DIAL_UNIT_COLOR_2;
+  const uint8_t* color = UFO_DEVICE_ID == static_cast<uint8_t>(DeviceId::M5Dial2) ? color2 : color1;
+  c.color_r = color[0];
+  c.color_g = color[1];
+  c.color_b = color[2];
+  c.rx_flash_ms = DIAL_RX_FLASH_MS;
+  c.rx_chase_ms = DIAL_RX_CHASE_MS;
+  c.transfer_led = DIAL_TRANSFER_LED_PIN >= 0;
   return c;
 }
 
@@ -137,6 +195,11 @@ uint32_t g_servo_ready_at = 0;
 CRGB g_leds[DIAL_LED_COUNT];
 CLEDController* g_led_ctl = nullptr;
 fx::PacificaState g_pacifica;
+// Second LED on G15 (NeoGacha topLed), game mode target TRANSFER.
+#if DIAL_TRANSFER_LED_PIN >= 0
+CRGB g_strip[DIAL_TRANSFER_LED_COUNT];
+CLEDController* g_strip_ctl = nullptr;
+#endif
 
 // ---- settings mode (UI state; the safety rules live in DialController) ----
 const char* const kLedPatterns[] = {"RED", "GREEN", "BLUE", "WHITE", "RAINBOW", "CHASE", "OFF"};
@@ -314,31 +377,78 @@ void renderSettingsLed(uint32_t now) {
   }
 }
 
+// Draws one effect frame: every pixel = colour x level at its path position.
+void drawEffect(const LedPlan& p, CRGB* leds, const LedGeometry& g) {
+  const uint16_t len = ledPathLength(g);
+  for (uint16_t i = 0; i < g.count; i++) {
+    uint8_t lv = dialEffectLevel(p.effect, p.direction, ledPathPos(g, i), len, p.elapsed_ms, p.duration_ms);
+    leds[i] = lv ? CRGB(p.r, p.g, p.b).nscale8_video(lv) : CRGB::Black;
+  }
+}
+
 void renderLed(uint32_t now) {
   static uint32_t last = 0;
-  if (!g_led_ctl || now - last < 20) return;
+  if (now - last < 20) return;
   last = now;
-  const uint16_t n = DIAL_LED_COUNT;
-  if (g_app.inSettings()) {
-    renderSettingsLed(now);
-  } else if (!g_runtime.core().hubLinkUp()) {
-    fx::breathe(g_leds, n, now, CRGB(120, 0, 0), 2000);
-  } else {
-    switch (g_app.dialState()) {
-      case DialState::Disabled: fx::pacifica(g_leds, n, g_pacifica, now); break;  // NeoGacha MODE_STOP
-      case DialState::Ready: fx::breathe(g_leds, n, now, CRGB(80, 80, 80), 3000); break;
-      case DialState::Armed: fx::chase(g_leds, n, now, CRGB(0, 180, 255), 200); break;
-      case DialState::BallDetected: fx::cylon(g_leds, n, now, 230); break;  // NeoGacha clyon()
-      case DialState::Releasing:
-      case DialState::Returning: fx::rainbow(g_leds, n, now * 3, 255); break;
-      case DialState::Complete: fx::fadeAll(g_leds, n, 245); break;  // NeoGacha fade()
-      case DialState::Error: fx::blink(g_leds, n, now, CRGB::Red, 500); break;
-      case DialState::Settings: break;
+  const bool servo = g_dispenser.busy();
+  if (g_led_ctl) {
+    const uint16_t n = DIAL_LED_COUNT;
+    LedGeometry front;
+    front.count = n;
+    front.layout = DIAL_LED_FOLDED ? LedLayout::Folded : LedLayout::Linear;
+    front.reversed = DIAL_LED_REVERSED != 0;
+    LedPlan p = g_app.ledPlan(DialLedTarget::Front, now);
+    const CRGB unit(p.r, p.g, p.b);
+    switch (p.scene) {
+      case LedScene::Settings: renderSettingsLed(now); break;
+      case LedScene::LinkLost: fx::breathe(g_leds, n, now, CRGB(120, 0, 0), 2000); break;
+      case LedScene::Error: fx::blink(g_leds, n, now, CRGB::Red, 500); break;
+      case LedScene::Idle: fx::pacifica(g_leds, n, g_pacifica, now); break;  // NeoGacha MODE_STOP
+      case LedScene::Ready: fx::breathe(g_leds, n, now, CRGB(80, 80, 80), 3000); break;
+      case LedScene::Armed: fx::chase(g_leds, n, now, unit, 200); break;
+      case LedScene::Complete: fx::fadeAll(g_leds, n, 245); break;  // NeoGacha fade()
+      case LedScene::Effect: drawEffect(p, g_leds, front); break;
+      case LedScene::Off: fill_solid(g_leds, n, CRGB::Black); break;
     }
+    uint8_t bri = DIAL_LED_BRIGHTNESS;
+    if (servo && bri > DIAL_LED_BRIGHTNESS_SERVO) bri = DIAL_LED_BRIGHTNESS_SERVO;
+    g_led_ctl->showLeds(bri);
   }
-  uint8_t bri = DIAL_LED_BRIGHTNESS;
-  if (g_dispenser.busy() && bri > DIAL_LED_BRIGHTNESS_SERVO) bri = DIAL_LED_BRIGHTNESS_SERVO;
-  g_led_ctl->showLeds(bri);
+#if DIAL_TRANSFER_LED_PIN >= 0
+  if (g_strip_ctl) {
+    LedGeometry strip;
+    strip.count = DIAL_TRANSFER_LED_COUNT;
+    strip.layout = DIAL_TRANSFER_LED_FOLDED ? LedLayout::Folded : LedLayout::Linear;
+    strip.reversed = DIAL_TRANSFER_LED_REVERSED != 0;
+    LedPlan p = g_app.ledPlan(DialLedTarget::Transfer, now);
+    if (p.scene == LedScene::Effect)
+      drawEffect(p, g_strip, strip);
+    else
+      fill_solid(g_strip, DIAL_TRANSFER_LED_COUNT, CRGB::Black);
+    uint8_t bri = DIAL_TRANSFER_LED_BRIGHTNESS;
+#if !DIAL_TRANSFER_LED_SEPARATE_POWER
+    // fed from the M5Dial 5 V: same power budget as the front LED while the servo runs
+    if (servo && bri > DIAL_LED_BRIGHTNESS_SERVO) bri = DIAL_LED_BRIGHTNESS_SERVO;
+#endif
+    g_strip_ctl->showLeds(bri);
+  }
+#endif
+}
+
+// Serial trace of the PC effects (matches the PC side trace by command_id).
+void logLedEffects() {
+  static uint32_t last_cmd[2] = {0, 0};
+  static DialEffect last_fx[2] = {DialEffect::None, DialEffect::None};
+  const DialLedTarget targets[2] = {DialLedTarget::Front, DialLedTarget::Transfer};
+  for (int i = 0; i < 2; ++i) {
+    const DialLedSlot& s = g_app.ledSlot(targets[i]);
+    if (s.effect == last_fx[i] && s.command_id == last_cmd[i]) continue;
+    last_fx[i] = s.effect;
+    last_cmd[i] = s.command_id;
+    Serial.printf("led %s: effect=%u dir=%u rgb=%u,%u,%u ms=%u prio=%u cmd=%lu cycle=%u\n", i ? "transfer" : "front",
+                  static_cast<unsigned>(s.effect), static_cast<unsigned>(s.direction), s.r, s.g, s.b, s.duration_ms,
+                  s.priority, static_cast<unsigned long>(s.command_id), g_app.cycle());
+  }
 }
 
 void beepOnStateChange() {
@@ -374,8 +484,12 @@ void setup() {
 
 #if DIAL_LED_PIN >= 0
   g_led_ctl = &FastLED.addLeds<NEOPIXEL, DIAL_LED_PIN>(g_leds, DIAL_LED_COUNT);
-  FastLED.clear(true);
 #endif
+#if DIAL_TRANSFER_LED_PIN >= 0
+  g_strip_ctl = &FastLED.addLeds<DIAL_TRANSFER_LED_CHIPSET, DIAL_TRANSFER_LED_PIN, DIAL_TRANSFER_LED_COLOR_ORDER>(
+      g_strip, DIAL_TRANSFER_LED_COUNT);
+#endif
+  FastLED.clear(true);
 
   uint32_t now = millis();
   M5Dial.update();
@@ -393,6 +507,15 @@ void setup() {
                 DIAL_RECEIVER_ACTIVE_LOW ? "active LOW (to GND)" : "active HIGH", DIAL_SERVO_SLEW_DEG_PER_S,
                 DIAL_SERVO_DETACH_MS);
 #endif
+  {
+    uint8_t r, g, b;
+    g_app.unitColor(r, g, b);
+    Serial.printf("unit colour %u,%u,%u; transfer strip: ", r, g, b);
+    if (DIAL_TRANSFER_LED_PIN >= 0)
+      Serial.printf("G%d x%d\n", DIAL_TRANSFER_LED_PIN, DIAL_TRANSFER_LED_COUNT);
+    else
+      Serial.println("not configured (front LED only)");
+  }
   Serial.printf("settings mode: hold the button %d ms\n", DIAL_SETTINGS_HOLD_MS);
   Serial.printf("reset reason: %s\n", resetReasonText(esp_reset_reason()));
   M5Dial.Speaker.tone(6000, 100);
@@ -447,6 +570,7 @@ void loop() {
     g_display.update(m);
   }
   beepOnStateChange();
+  logLedEffects();
   renderLed(now);
   delay(1);
 }

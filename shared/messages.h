@@ -28,6 +28,9 @@ enum class CommandCode : uint8_t {
   ArmReceiver = 0x20,     // no params
   DisarmReceiver = 0x21,  // no params
   ReleaseBall = 0x22,     // no params (angles/hold time are device config, not wire params)
+  // Game mode LED contract (docs/game-mode-interface.md)
+  SetDialEffect = 0x23,   // u8 DialEffect, u8 DialDirection, u8 r, u8 g, u8 b, u16 duration_ms, u8 EffectPriority, u8 DialLedTarget
+  SetDialColor = 0x24,    // u8 r, u8 g, u8 b (unit colour; 0,0,0 = configured default)
 };
 
 // ---- EVENT (device -> Hub -> PC) ---------------------------------------------
@@ -129,6 +132,44 @@ enum class DialState : uint8_t {
   Settings = 0x08,  // device-side settings / hardware test mode (button long press)
 };
 
+// ---- M5Dial LED effects (SET_DIAL_EFFECT) -----------------------------------
+enum class DialEffect : uint8_t {
+  None = 0x00,     // stop the PC effect: the device shows its own state again
+  Solid = 0x01,
+  Breathe = 0x02,
+  Chase = 0x03,    // directional: every 4th pixel lit, running
+  Comet = 0x04,    // directional: one head with a fading tail, repeating
+  Wipe = 0x05,     // directional: fills over duration_ms (0 = 1 s, repeating)
+  Flash = 0x06,    // 5 Hz blink
+  Sparkle = 0x07,
+};
+
+// Direction of the light flow between the real machine (dial) and the screen.
+enum class DialDirection : uint8_t {
+  None = 0x00,
+  ToScreen = 0x01,  // dial -> screen (capsule taken in)
+  ToDial = 0x02,    // screen -> dial (capsule returned)
+};
+
+// A new effect replaces the running one only if its priority is >= the running one.
+enum class EffectPriority : uint8_t {
+  Background = 0x00,
+  Normal = 0x01,
+  High = 0x02,
+};
+
+// LED outputs of one dial (bit mask).
+enum class DialLedTarget : uint8_t {
+  Front = 0x01,      // M5Dial front LED on G1 (always present)
+  Transfer = 0x02,  // second LED on G15 (NeoGacha topLed; optional in the configuration)
+  Both = 0x03,
+};
+
+enum class DialLedFlag : uint8_t {
+  TransferFitted = 0x01,  // the second LED (G15) is configured on this unit
+};
+inline uint8_t u8(DialLedFlag f) { return static_cast<uint8_t>(f); }
+
 enum class IlluminationState : uint8_t {
   Normal = 0x00,
   Effect = 0x01,
@@ -217,6 +258,19 @@ struct SetMistParams {
   uint8_t pattern = 0;      // MistPattern
   uint16_t duration_s = 0;  // 0 = device maximum
 };
+struct SetDialEffectParams {
+  uint8_t effect = 0;        // DialEffect
+  uint8_t direction = 0;     // DialDirection (required for Chase / Comet / Wipe)
+  uint8_t r = 0, g = 0, b = 0;  // 0,0,0 = the unit colour
+  uint16_t duration_ms = 0;  // 0 = until replaced / cleared by the device
+  uint8_t priority = 1;      // EffectPriority
+  uint8_t target = 3;        // DialLedTarget mask
+};
+struct SetDialColorParams {
+  uint8_t r = 0, g = 0, b = 0;  // 0,0,0 = back to the configured default
+};
+// Chase / Comet / Wipe have a flow direction and need ToScreen or ToDial.
+bool dialEffectIsDirectional(uint8_t effect);
 
 // Command payload builders: write [code][params...]; return size or 0.
 size_t encodeCommand(CommandCode code, uint8_t* out, size_t cap);  // no-param commands
@@ -226,6 +280,8 @@ size_t encodeTriggerEffect(const TriggerEffectParams& p, uint8_t* out, size_t ca
 size_t encodeRelayPulse(const RelayPulseParams& p, uint8_t* out, size_t cap);
 size_t encodeRelayOff(uint8_t relay_id, uint8_t* out, size_t cap);
 size_t encodeSetMist(const SetMistParams& p, uint8_t* out, size_t cap);
+size_t encodeSetDialEffect(const SetDialEffectParams& p, uint8_t* out, size_t cap);
+size_t encodeSetDialColor(const SetDialColorParams& p, uint8_t* out, size_t cap);
 
 // Param decoders take the bytes AFTER the command code and require an exact length.
 bool decodeSetMode(const uint8_t* p, size_t n, OperationMode& m);
@@ -234,6 +290,8 @@ bool decodeTriggerEffect(const uint8_t* p, size_t n, TriggerEffectParams& out);
 bool decodeRelayPulse(const uint8_t* p, size_t n, RelayPulseParams& out);
 bool decodeRelayOff(const uint8_t* p, size_t n, uint8_t& relay_id);
 bool decodeSetMist(const uint8_t* p, size_t n, SetMistParams& out);
+bool decodeSetDialEffect(const uint8_t* p, size_t n, SetDialEffectParams& out);
+bool decodeSetDialColor(const uint8_t* p, size_t n, SetDialColorParams& out);
 // Expected param length for a command code (-1 = unknown command).
 int commandParamLength(uint8_t code);
 
@@ -320,8 +378,15 @@ struct DialStatus {
   uint16_t releases = 0;
   uint32_t last_release_command = 0;
   uint8_t sim_button = 0;
+  // Game mode LED fields (firmware >= 0.3). A 12-byte status from an older
+  // dial is still accepted; these then stay 0.
+  uint8_t front_effect = 0;      // DialEffect the PC is running on the front LED (0 = device state display)
+  uint8_t transfer_effect = 0;  // same for the second LED (G15)
+  uint8_t led_flags = 0;        // DialLedFlag bits
+  uint8_t color_r = 0, color_g = 0, color_b = 0;  // unit colour in use
 };
-constexpr size_t kDialStatusSize = 12;
+constexpr size_t kDialStatusSize = 18;
+constexpr size_t kDialStatusSizeV1 = 12;  // firmware 0.2 and older
 
 size_t encodeStatus(const StatusCommon& c, const IlluminationStatus* il, const DialStatus* dl,
                     uint8_t* out, size_t cap);

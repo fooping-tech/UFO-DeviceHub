@@ -11,10 +11,21 @@
 // nothing is running): servo / LED / switch tests. No events are sent, every
 // PC command except STOP_ALL is RejectedState; STOP_ALL leaves SETTINGS.
 //
+// LED (game mode, docs/game-mode-interface.md): the PC can run an effect on the
+// front LED (G1) and / or the second LED (G15) with SET_DIAL_EFFECT. Display order:
+//   1. SETTINGS, hub link lost, ERROR            (the PC effect is dropped)
+//   2. white flash for rx_flash_ms after a ball is detected (always, at once)
+//   3. the PC effect while it is active
+//   4. the device's own state display (receive chase TO_SCREEN in the unit
+//      colour, release chase TO_DIAL, ...)
+// A detected ball, the end of a release, STOP_ALL, a session change, link loss
+// and SETTINGS clear the PC effects. LEDs never delay or block the servo.
+//
 // The device never decides game outcomes: it only reports and executes.
 #pragma once
 
 #include "ball_receiver.h"
+#include "dial_led.h"
 #include "dispenser.h"
 #include "node_core.h"
 
@@ -23,6 +34,11 @@ namespace ufo {
 struct DialConfig {
   bool abort_release_on_link_loss = false;
   bool sim_button = false;
+  // Game mode LEDs
+  uint8_t color_r = 0, color_g = 255, color_b = 255;  // unit colour (dial 1: cyan, dial 2: magenta)
+  uint16_t rx_flash_ms = 150;   // white flash when a ball is detected
+  uint16_t rx_chase_ms = 1500;  // then the unit colour runs TO_SCREEN this long
+  bool transfer_led = false;    // the second LED (G15) is configured
 };
 
 class DialController : public NodeApp {
@@ -59,6 +75,17 @@ class DialController : public NodeApp {
   uint16_t settingsSwitchCount() const { return settings_switch_count_; }
   void resetSettingsSwitchCount() { settings_switch_count_ = 0; }
 
+  // LEDs: what the given output (DialLedTarget::Front / Transfer) shows at `now`.
+  LedPlan ledPlan(DialLedTarget target, uint32_t now) const;
+  const DialLedSlot& ledSlot(DialLedTarget target) const {
+    return slots_[target == DialLedTarget::Transfer ? 1 : 0];
+  }
+  void unitColor(uint8_t& r, uint8_t& g, uint8_t& b) const {
+    r = color_[0];
+    g = color_[1];
+    b = color_[2];
+  }
+
   DialState dialState() const { return state_; }
   OperationMode operationMode() const { return op_mode_; }
   uint16_t cycle() const { return cycle_; }
@@ -68,6 +95,9 @@ class DialController : public NodeApp {
  private:
   void toIdleState();
   void emit(EventData& e, uint32_t now);
+  void clearEffects();
+  void resetUnitColor();
+  CommandOutcome setDialEffect(const uint8_t* params, size_t len, uint32_t command_id, uint32_t now);
 
   Dispenser& dispenser_;
   BallReceiver& receiver_;
@@ -83,6 +113,10 @@ class DialController : public NodeApp {
   bool link_up_ = false;
   uint16_t settings_switch_count_ = 0;
   bool quiet_motion_ = false;  // the running servo motion is a settings test: no events
+  DialLedSlot slots_[2];       // PC effects: [0] front LED (G1), [1] second LED (G15)
+  uint8_t color_[3] = {0, 255, 255};
+  uint32_t detected_at_ = 0;   // BALL_DETECTED since (local receive animation)
+  uint32_t release_at_ = 0;    // RELEASING since (local release animation)
 };
 
 }  // namespace ufo

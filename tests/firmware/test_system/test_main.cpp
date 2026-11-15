@@ -234,6 +234,121 @@ void test_stop_all_always_accepted() {
   TEST_ASSERT_FALSE(w.illum.gpio.on);
 }
 
+// ---- game mode: left (dial 1) / right (dial 2) capsule transfer ------------------
+static LedPlan ring(World& w, Dial& d) { return d.app.ledPlan(DialLedTarget::Front, w.now); }
+
+void test_left_right_simultaneous_receive_and_release() {
+  World w;
+  ready(w);
+  for (uint8_t d : {D1, D2}) {
+    w.command(d, "SET_MODE", "{\"mode\":\"GAME\"}");
+    w.command(d, "ARM_RECEIVER");
+  }
+  w.runAlive(50);
+  w.dial1.sw = w.dial2.sw = true;  // both capsules in the same instant
+  w.runAlive(40);
+  for (Dial* d : {&w.dial1, &w.dial2}) {  // local flash before the PC reacts
+    TEST_ASSERT_EQUAL(DialEffect::Solid, ring(w, *d).effect);
+    TEST_ASSERT_FALSE(ring(w, *d).from_pc);
+  }
+  w.runAlive(200);
+  auto got = w.events("BALL_RECEIVED");
+  for (auto& e : got) w.ackEvent(e);
+  bool seen1 = false, seen2 = false;
+  for (auto& e : got) {
+    seen1 |= e["source"].as<int>() == D1;
+    seen2 |= e["source"].as<int>() == D2;
+  }
+  TEST_ASSERT_TRUE(seen1 && seen2);
+  // same direction, each in its own colour (dial 2 gets magenta from the PC)
+  uint32_t c = w.command(D2, "SET_DIAL_COLOR", "{\"color\":[255,0,255]}");
+  w.runAlive(50);
+  TEST_ASSERT_EQUAL_STRING("ACCEPTED", w.ackFor(c)["result"]);
+  TEST_ASSERT_EQUAL(DialDirection::ToScreen, ring(w, w.dial1).direction);
+  TEST_ASSERT_EQUAL(DialDirection::ToScreen, ring(w, w.dial2).direction);
+  TEST_ASSERT_EQUAL(0, ring(w, w.dial1).r);
+  TEST_ASSERT_EQUAL(255, ring(w, w.dial2).r);
+  // both released together
+  uint32_t fx1 = w.command(D1, "SET_DIAL_EFFECT", "{\"effect\":\"COMET\",\"direction\":\"TO_DIAL\"}");
+  uint32_t fx2 = w.command(D2, "SET_DIAL_EFFECT", "{\"effect\":\"COMET\",\"direction\":\"TO_DIAL\"}");
+  uint32_t r1 = w.command(D1, "RELEASE_BALL");
+  uint32_t r2 = w.command(D2, "RELEASE_BALL");
+  w.runAlive(100);
+  for (uint32_t id : {fx1, fx2, r1, r2}) TEST_ASSERT_EQUAL_STRING("ACCEPTED", w.ackFor(id)["result"]);
+  TEST_ASSERT_EQUAL(DialEffect::Comet, ring(w, w.dial1).effect);
+  TEST_ASSERT_EQUAL(DialEffect::Comet, ring(w, w.dial2).effect);
+  w.runAlive(2600);
+  auto done = w.events("RELEASE_DONE");
+  bool d1 = false, d2 = false;
+  for (auto& e : done) {
+    d1 |= e["source"].as<int>() == D1 && e["data"]["command_id"].as<uint32_t>() == r1;
+    d2 |= e["source"].as<int>() == D2 && e["data"]["command_id"].as<uint32_t>() == r2;
+  }
+  TEST_ASSERT_TRUE(d1 && d2);
+  TEST_ASSERT_EQUAL(1, w.dial1.servo.count(0));
+  TEST_ASSERT_EQUAL(1, w.dial2.servo.count(0));
+  TEST_ASSERT_EQUAL(LedScene::Complete, ring(w, w.dial1).scene);  // the dials ended the animation themselves
+  TEST_ASSERT_EQUAL(LedScene::Complete, ring(w, w.dial2).scene);
+}
+
+void test_left_right_opposite_directions_with_ack_loss() {
+  World w;
+  ready(w);
+  for (uint8_t d : {D1, D2}) {
+    w.command(d, "SET_MODE", "{\"mode\":\"GAME\"}");
+    w.command(d, "ARM_RECEIVER");
+  }
+  w.runAlive(50);
+  w.dial2.sw = true;  // right capsule first ...
+  w.runAlive(400);
+  for (auto& e : w.events("BALL_RECEIVED")) w.ackEvent(e);
+  // ... it is returned while the left dial takes a capsule in; dial 2's ACKs are lost twice
+  int to_drop = 2;
+  w.air.drop = [&](const Air::Msg& m) { return isAckFrom(m, DeviceId::M5Dial2) && to_drop-- > 0; };
+  uint32_t fx = w.command(D2, "SET_DIAL_EFFECT", "{\"effect\":\"WIPE\",\"direction\":\"TO_DIAL\",\"duration_ms\":3000}");
+  w.dial1.sw = true;
+  w.runAlive(600);
+  JsonDocument ack = w.ackFor(fx);
+  TEST_ASSERT_EQUAL_STRING("ACCEPTED", ack["result"]);
+  TEST_ASSERT_TRUE(ack["duplicate"].as<bool>());
+  TEST_ASSERT_TRUE(ring(w, w.dial2).elapsed_ms >= 590);  // applied once: the resends did not restart it
+  TEST_ASSERT_EQUAL(DialDirection::ToDial, ring(w, w.dial2).direction);
+  TEST_ASSERT_EQUAL(DialDirection::ToScreen, ring(w, w.dial1).direction);  // local receive chase on the left
+  uint32_t rel = w.command(D2, "RELEASE_BALL");
+  w.runAlive(2600);
+  TEST_ASSERT_EQUAL_STRING("ACCEPTED", w.ackFor(rel)["result"]);
+  TEST_ASSERT_EQUAL(1, w.dial2.servo.count(0));
+  TEST_ASSERT_EQUAL(0, w.dial1.servo.count(0));  // the left dial keeps its capsule
+  TEST_ASSERT_EQUAL(DialState::BallDetected, w.dial1.app.dialState());
+}
+
+void test_effects_stop_when_pc_or_dial_goes_away() {
+  World w;
+  ready(w);
+  uint32_t id = w.command(D1, "SET_DIAL_EFFECT", "{\"effect\":\"SOLID\",\"priority\":\"HIGH\"}");
+  w.command(D2, "SET_DIAL_EFFECT", "{\"effect\":\"SOLID\",\"priority\":\"HIGH\"}");
+  w.runAlive(50);
+  TEST_ASSERT_EQUAL_STRING("ACCEPTED", w.ackFor(id)["result"]);
+  TEST_ASSERT_TRUE(ring(w, w.dial1).from_pc);
+  // dial 2 reboots: nothing is restored
+  w.dial2.powered = false;
+  w.runAlive(3500);
+  w.dial2.powered = true;
+  w.dial2.boot(w.now, 0x777);
+  w.runAlive(1500);
+  TEST_ASSERT_FALSE(ring(w, w.dial2).from_pc);
+  TEST_ASSERT_TRUE(ring(w, w.dial1).from_pc);  // dial 1 was not affected
+  // the PC disappears: session end -> effect off
+  w.run(3500);
+  TEST_ASSERT_EQUAL(0, w.hub.session());
+  TEST_ASSERT_FALSE(ring(w, w.dial1).from_pc);
+  // a command of the dead session is not applied later
+  uint32_t late = w.command(D1, "SET_DIAL_EFFECT", "{\"effect\":\"SOLID\"}");
+  w.run(100);
+  TEST_ASSERT_EQUAL_STRING("NO_SESSION", w.ackFor(late)["result"]);
+  TEST_ASSERT_FALSE(ring(w, w.dial1).from_pc);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_individual_control_of_three_devices);
@@ -247,5 +362,8 @@ int main() {
   RUN_TEST(test_old_session_commands_not_replayed_after_reconnect);
   RUN_TEST(test_foreign_broadcast_frames_do_nothing);
   RUN_TEST(test_stop_all_always_accepted);
+  RUN_TEST(test_left_right_simultaneous_receive_and_release);
+  RUN_TEST(test_left_right_opposite_directions_with_ack_loss);
+  RUN_TEST(test_effects_stop_when_pc_or_dial_goes_away);
   return UNITY_END();
 }

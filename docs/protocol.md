@@ -8,6 +8,8 @@
 | Message / Command / Event / ACK / 状態の値 | `shared/messages.h`, `shared/messages.cpp` | `pc/protocol.py` |
 | Device ID | `shared/device_ids.h` | `pc/protocol.py` |
 
+ゲームモード（左右 Dial のカプセル転送 LED 演出・排出同期）の契約は [game-mode-interface.md](game-mode-interface.md)。
+
 `tests/protocol/test_consistency.py` がヘッダを解析し、Python 側と値・名前・パラメータ長が一致しなければ失敗する。
 `tests/protocol/vectors.json`（`tests/tools/gen_vectors.py` で生成）を C++ と Python の両方のテストが検証する（バイト単位で同一）。
 
@@ -79,6 +81,8 @@ COMMAND / EVENT の payload は先頭 1 Byte がコード。
 | 0x20 | ARM_RECEIVER | なし | 必須 |
 | 0x21 | DISARM_RECEIVER | なし | 不要 |
 | 0x22 | RELEASE_BALL | なし（角度・保持時間は機器設定でありワイヤに載せない） | 必須 |
+| 0x23 | SET_DIAL_EFFECT | u8 DialEffect, u8 DialDirection, u8 r, u8 g, u8 b（0,0,0 = 号機色）, u16 duration_ms（0 = 置き換えまで）, u8 EffectPriority, u8 DialLedTarget | 必須 |
+| 0x24 | SET_DIAL_COLOR | u8 r, u8 g, u8 b（号機色。0,0,0 = 設定の既定色） | 必須 |
 
 params 長が表と 1 Byte でも違えば `INVALID_PARAMS`。
 
@@ -129,7 +133,8 @@ flags: `0x01 DUPLICATE`（同じ command_id を処理済み。結果は保存値
 
 共通 15 Byte: `u8 device_type, u8 state, u8 flags, u8 error, u8 op_mode, u32 uptime_ms, u32 boot_id, u8 fw_major, u8 fw_minor`
 + Illumination 18 Byte: `u8 light_mode, u8 brightness, u8 active_effect, u16 effect_remaining_ms, u8 relay_on_mask, u16 relay_remaining_ms, u16 relay_cooldown_ms, u16 relay_pulses, u8 mist_pattern, u8 mist_flags (0x01 OUTPUT_ON, 0x02 LOCAL_MODE), u16 mist_remaining_s, u16 mist_on_s`
-+ Dial 12 Byte: `u8 dial_state, u16 cycle, u8 switch_on, u8 servo_deg, u16 releases, u32 last_release_command, u8 sim_button`
++ Dial 18 Byte: `u8 dial_state, u16 cycle, u8 switch_on, u8 servo_deg, u16 releases, u32 last_release_command, u8 sim_button, u8 front_effect, u8 transfer_effect, u8 led_flags (0x01 TRANSFER_FITTED), u8 color_r, u8 color_g, u8 color_b`
+  * 末尾 6 Byte はファームウェア 0.3 で追加。0.2 以前の Dial の 12 Byte も受理する（追加項目は 0）
 
 NodeFlag: `0x01 SESSION_VALID, 0x02 HUB_LINK_UP, 0x04 BUSY, 0x08 EXAMPLE_KEYS, 0x10 CONFIG_ERROR, 0x20 RELAY_ON（蒸気リレーまたはミスト）, 0x40 SWITCH_ON, 0x80 GAME_MODE`
 
@@ -139,6 +144,10 @@ NodeFlag: `0x01 SESSION_VALID, 0x02 HUB_LINK_UP, 0x04 BUSY, 0x08 EXAMPLE_KEYS, 0
 * MistPattern: 0 OFF, 1 CONTINUOUS, 2 BREATH（8 秒出す / 6 秒休む）, 3 PUFF（3 秒出す / 9 秒休む）
 * EffectId: 1 GAME_START, 2 ARM_MOVE, 3 ARM_DESCEND, 4 CATCH, 5 BALL_RECEIVED, 6 BALL_RELEASED, 7 SCORE, 8 GAME_CLEAR, 9 GAME_OVER
 * DialState: 0 DISABLED, 1 READY, 2 ARMED, 3 BALL_DETECTED, 4 RELEASING, 5 RETURNING, 6 COMPLETE, 7 ERROR, 8 SETTINGS（本体の設定モード。STOP_ALL 以外の命令は REJECTED_STATE）
+* DialEffect: 0 NONE, 1 SOLID, 2 BREATHE, 3 CHASE, 4 COMET, 5 WIPE, 6 FLASH, 7 SPARKLE（CHASE / COMET / WIPE は方向が必須）
+* DialDirection: 0 NONE, 1 TO_SCREEN（実機 → 画面）, 2 TO_DIAL（画面 → 実機）
+* EffectPriority: 0 BACKGROUND, 1 NORMAL, 2 HIGH（実行中より低い優先度は `IGNORED_PRIORITY`）
+* DialLedTarget: 1 FRONT（G1 の LED）, 2 TRANSFER（G15 の LED。使わない設定なら `NOT_CONFIGURED`）, 3 BOTH
 * IlluminationState: 0 NORMAL, 1 EFFECT, 2 RELAY_ACTIVE, 3 MIST_ACTIVE, 7 ERROR
 
 ---
@@ -215,6 +224,8 @@ COMMAND の `name` と `params`:
 | `RELAY_OFF` | `relay_id`(255=全部) |
 | `SET_MIST` | `pattern`(必須: `OFF` / `CONTINUOUS` / `BREATH` / `PUFF`), `duration_s`(0=機器の最大) |
 | `SET_MODE` | `mode`: `STANDBY` / `GAME` |
+| `SET_DIAL_EFFECT` | `effect`(必須), `direction`(NONE), `color`(省略 = 号機色), `duration_ms`(0), `priority`(NORMAL), `target`(BOTH) |
+| `SET_DIAL_COLOR` | `color`（省略 / `[0,0,0]` = 設定の既定色） |
 | `ARM_RECEIVER`, `DISARM_RECEIVER`, `RELEASE_BALL`, `STOP_ALL`, `GET_STATUS` | なし |
 
 列挙は名前（`"GAME_PLAY"`）でも数値でもよい。
@@ -227,7 +238,7 @@ COMMAND の `name` と `params`:
 | `HELLO_ACK` | `session_id, fw, hub_mac, channel, system_id, system_check, example_keys, example_devices` |
 | `ACK` | `destination, command_id, result, origin ("device"/"hub"), duplicate, clamped, attempts, reason?` |
 | `EVENT` | `source, session_id, event_id, name, attempt, data` |
-| `STATUS` | `source, device_type, state, flags{...}, op_mode, uptime_ms, boot_id, fw, error` + 機器別項目（Illumination: `light_mode, brightness, active_effect, effect_remaining_ms, relay_*, mist_pattern, mist_on, local_mode, mist_remaining_s, mist_on_s`） |
+| `STATUS` | `source, device_type, state, flags{...}, op_mode, uptime_ms, boot_id, fw, error` + 機器別項目（Illumination: `light_mode, brightness, active_effect, effect_remaining_ms, relay_*, mist_pattern, mist_on, local_mode, mist_remaining_s, mist_on_s` / Dial: `dial_state, cycle, switch_on, servo_deg, releases, last_release_command, sim_button, front_effect, transfer_effect, transfer_led, unit_color`） |
 | `LINK` | `source, online` |
 | `DEVICE_REBOOTED` | `source, boot_id` |
 | `SESSION_CLOSED` | `session_id, reason (pc_timeout / pc_request)` |
@@ -254,6 +265,8 @@ gw.relay_pulse(1500)
 gw.set_mode(DeviceId.M5DIAL_1, "GAME")
 gw.arm_receiver(DeviceId.M5DIAL_1)
 res = gw.release_ball(DeviceId.M5DIAL_1)   # CommandResult(result="ACCEPTED", ...)
+gw.set_dial_effect(DeviceId.M5DIAL_1, "CHASE", "TO_SCREEN", duration_ms=1500)  # LED 演出（game-mode-interface.md）
+gw.set_dial_color(DeviceId.M5DIAL_2, (255, 0, 255)); gw.clear_dial_effect(DeviceId.M5DIAL_1)
 gw.get_status(DeviceId.M5DIAL_1); gw.get_devices(); gw.get_diagnostics()
 gw.stop_all()
 ```
@@ -263,3 +276,4 @@ gw.stop_all()
 * パラメータ不正は `ProtocolError`（送信前）。
 * イベント: `BALL_RECEIVED, RELEASE_STARTED, RELEASE_DONE, RELEASE_FAILED, RELAY_DONE, MIST_DONE, ERROR`（機器）と `DEVICE_ONLINE, DEVICE_OFFLINE, DEVICE_REBOOTED, SESSION_CLOSED, GATEWAY_CONNECTED, GATEWAY_DISCONNECTED, HUB_ERROR`（通信層）。
 * `event_queue()` / `asyncio_queue(loop)` でも受け取れる。
+* `DeviceGateway(trace=TraceLog(path).record)` で命令・ACK・イベントを JSON Lines に記録する（`pc/trace.py`）。名前付きのゲームモード演出は `pc/game_mode.py`。

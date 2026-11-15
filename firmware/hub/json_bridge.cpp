@@ -15,6 +15,10 @@ const char* const kEffects[] = {"NONE",          "GAME_START", "ARM_MOVE", "ARM_
 const char* const kDialStates[] = {"DISABLED",  "READY",     "ARMED",    "BALL_DETECTED",
                                    "RELEASING", "RETURNING", "COMPLETE", "ERROR",    "SETTINGS"};
 const char* const kOpModes[] = {"STANDBY", "GAME"};
+const char* const kDialEffects[] = {"NONE", "SOLID", "BREATHE", "CHASE", "COMET", "WIPE", "FLASH", "SPARKLE"};
+const char* const kDialDirections[] = {"NONE", "TO_SCREEN", "TO_DIAL"};
+const char* const kEffectPriorities[] = {"BACKGROUND", "NORMAL", "HIGH"};
+const char* const kDialLedTargets[] = {"", "FRONT", "TRANSFER", "BOTH"};  // bit mask 1..3
 
 template <size_t N>
 bool parseNamed(JsonVariantConst v, const char* const (&names)[N], uint8_t min, uint8_t& out) {
@@ -116,6 +120,9 @@ const char* mistPatternName(uint8_t p) {
 }
 const char* effectName(uint8_t e) { return e < 10 ? kEffects[e] : "UNKNOWN"; }
 const char* dialStateName(uint8_t s) { return s < 9 ? kDialStates[s] : "UNKNOWN"; }
+const char* dialEffectName(uint8_t e) {
+  return e < sizeof(kDialEffects) / sizeof(kDialEffects[0]) ? kDialEffects[e] : "UNKNOWN";
+}
 const char* illuminationStateName(uint8_t s) {
   switch (static_cast<IlluminationState>(s)) {
     case IlluminationState::Normal: return "NORMAL";
@@ -262,6 +269,48 @@ size_t buildCommandPayload(const char* name, JsonVariantConst params, uint8_t* o
     }
     p.duration_s = static_cast<uint16_t>(v);
     return encodeSetMist(p, out, cap);
+  }
+  if (strcmp(name, "SET_DIAL_EFFECT") == 0) {
+    SetDialEffectParams p;
+    uint32_t v;
+    if (!parseNamed(params["effect"], kDialEffects, 0, p.effect)) {
+      *error = "effect must be NONE, SOLID, BREATHE, CHASE, COMET, WIPE, FLASH or SPARKLE";
+      return 0;
+    }
+    if (!params["direction"].isNull() && !parseNamed(params["direction"], kDialDirections, 0, p.direction)) {
+      *error = "direction must be NONE, TO_SCREEN or TO_DIAL";
+      return 0;
+    }
+    if (dialEffectIsDirectional(p.effect) && p.direction == static_cast<uint8_t>(DialDirection::None)) {
+      *error = "CHASE / COMET / WIPE need direction TO_SCREEN or TO_DIAL";
+      return 0;
+    }
+    if (!parseColor(params["color"], p.r, p.g, p.b)) {
+      *error = "color must be [r,g,b] or #RRGGBB";
+      return 0;
+    }
+    if (!getUint(params, "duration_ms", 65535, 0, false, v)) {
+      *error = "duration_ms 0-65535 (0 = until replaced)";
+      return 0;
+    }
+    p.duration_ms = static_cast<uint16_t>(v);
+    if (!params["priority"].isNull() && !parseNamed(params["priority"], kEffectPriorities, 0, p.priority)) {
+      *error = "priority must be BACKGROUND, NORMAL or HIGH";
+      return 0;
+    }
+    if (!params["target"].isNull() && !parseNamed(params["target"], kDialLedTargets, 1, p.target)) {
+      *error = "target must be FRONT, TRANSFER or BOTH";
+      return 0;
+    }
+    return encodeSetDialEffect(p, out, cap);
+  }
+  if (strcmp(name, "SET_DIAL_COLOR") == 0) {
+    SetDialColorParams p;
+    if (!parseColor(params["color"], p.r, p.g, p.b)) {
+      *error = "color must be [r,g,b] or #RRGGBB";
+      return 0;
+    }
+    return encodeSetDialColor(p, out, cap);
   }
   *error = "unknown command";
   return 0;
@@ -538,6 +587,13 @@ void HubJsonBridge::statusToPc(uint8_t source, const StatusCommon& c, const Illu
     d["releases"] = dl.releases;
     d["last_release_command"] = dl.last_release_command;
     d["sim_button"] = dl.sim_button != 0;
+    d["front_effect"] = dialEffectName(dl.front_effect);
+    d["transfer_effect"] = dialEffectName(dl.transfer_effect);
+    d["transfer_led"] = (dl.led_flags & u8(DialLedFlag::TransferFitted)) != 0;
+    JsonArray col = d["unit_color"].to<JsonArray>();
+    col.add(dl.color_r);
+    col.add(dl.color_g);
+    col.add(dl.color_b);
   }
   emit(d);
 }

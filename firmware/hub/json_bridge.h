@@ -96,6 +96,7 @@ const char* lightModeName(uint8_t m);
 const char* mistPatternName(uint8_t p);
 const char* effectName(uint8_t e);
 const char* dialStateName(uint8_t s);
+const char* dialEffectName(uint8_t e);
 const char* illuminationStateName(uint8_t s);
 const char* deviceTypeName(uint8_t t);
 bool parseLightMode(JsonVariantConst v, uint8_t& out);

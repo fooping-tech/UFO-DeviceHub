@@ -11,14 +11,31 @@ from .device_gateway import (
     SerialLineTransport,
     TransportError,
 )
-from .protocol import CommandResult, DeviceEvent, DeviceId, EffectId, LightMode, OperationMode, ProtocolError
+from .protocol import (
+    CommandResult,
+    DeviceEvent,
+    DeviceId,
+    DialDirection,
+    DialEffect,
+    DialLedTarget,
+    EffectId,
+    EffectPriority,
+    LightMode,
+    OperationMode,
+    ProtocolError,
+)
+from .trace import TraceLog
 
 __all__ = [
     "CommandResult",
     "DeviceEvent",
     "DeviceGateway",
     "DeviceId",
+    "DialDirection",
+    "DialEffect",
+    "DialLedTarget",
     "EffectId",
+    "EffectPriority",
     "GatewayError",
     "GatewayNotConnected",
     "LightMode",
@@ -26,5 +43,6 @@ __all__ = [
     "OperationMode",
     "ProtocolError",
     "SerialLineTransport",
+    "TraceLog",
     "TransportError",
 ]

@@ -81,6 +81,68 @@ void test_set_mist_validation_and_status() {
   TEST_ASSERT_EQUAL(1, ev["data"]["reason"].as<int>());  // OFF_COMMAND
 }
 
+void test_set_dial_effect_validation_and_status() {
+  World w;
+  online(w);
+  w.hello(77);
+  w.run(50);
+  const char* bad[] = {
+      "{}",                                                 // effect is required
+      "{\"effect\":\"DISCO\"}",
+      "{\"effect\":\"CHASE\"}",                            // directional effect without a direction
+      "{\"effect\":\"COMET\",\"direction\":\"NONE\"}",
+      "{\"effect\":\"SOLID\",\"direction\":\"UP\"}",
+      "{\"effect\":\"SOLID\",\"priority\":\"URGENT\"}",
+      "{\"effect\":\"SOLID\",\"target\":0}",
+      "{\"effect\":\"SOLID\",\"target\":\"LEFT\"}",
+      "{\"effect\":\"SOLID\",\"duration_ms\":70000}",
+      "{\"effect\":\"SOLID\",\"color\":[1,2]}",
+  };
+  for (const char* p : bad) {
+    uint32_t id = w.command(D1, "SET_DIAL_EFFECT", p);
+    TEST_ASSERT_EQUAL_STRING_MESSAGE("BAD_REQUEST", w.ackFor(id)["result"], p);
+    TEST_ASSERT_EQUAL_STRING("hub", w.ackFor(id)["origin"]);
+  }
+  TEST_ASSERT_EQUAL(LedScene::Idle, w.dial1.app.ledPlan(DialLedTarget::Front, w.now).scene);
+
+  uint32_t id = w.command(D1, "SET_DIAL_EFFECT",
+                          "{\"effect\":\"COMET\",\"direction\":\"TO_DIAL\",\"color\":\"#0A0B0C\","
+                          "\"duration_ms\":0,\"priority\":\"HIGH\",\"target\":\"FRONT\"}");
+  w.run(50);
+  TEST_ASSERT_EQUAL_STRING("ACCEPTED", w.ackFor(id)["result"]);
+  TEST_ASSERT_EQUAL_STRING("device", w.ackFor(id)["origin"]);
+  LedPlan p = w.dial1.app.ledPlan(DialLedTarget::Front, w.now);
+  TEST_ASSERT_EQUAL(DialEffect::Comet, p.effect);
+  TEST_ASSERT_EQUAL(DialDirection::ToDial, p.direction);
+  TEST_ASSERT_EQUAL(10, p.r);
+  TEST_ASSERT_EQUAL(12, p.b);
+  TEST_ASSERT_EQUAL(LedScene::Idle, w.dial2.app.ledPlan(DialLedTarget::Front, w.now).scene);  // only dial 1
+
+  id = w.command(D1, "SET_DIAL_EFFECT", "{\"effect\":\"SOLID\"}");  // defaults: NORMAL, BOTH
+  w.run(50);
+  TEST_ASSERT_EQUAL_STRING("IGNORED_PRIORITY", w.ackFor(id)["result"]);
+  id = w.command(D1, "SET_DIAL_EFFECT", "{\"effect\":\"CHASE\",\"direction\":\"TO_SCREEN\",\"target\":\"TRANSFER\"}");
+  w.run(50);
+  TEST_ASSERT_EQUAL_STRING("NOT_CONFIGURED", w.ackFor(id)["result"]);  // no external strip on this unit
+  id = w.command(ILL, "SET_DIAL_EFFECT", "{\"effect\":\"SOLID\"}");
+  w.run(50);
+  TEST_ASSERT_EQUAL_STRING("UNSUPPORTED", w.ackFor(id)["result"]);  // not a dial
+
+  id = w.command(D1, "SET_DIAL_COLOR", "{\"color\":[255,0,128]}");
+  w.run(50);
+  TEST_ASSERT_EQUAL_STRING("ACCEPTED", w.ackFor(id)["result"]);
+  id = w.command(D1, "SET_DIAL_COLOR", "{\"color\":\"red\"}");
+  TEST_ASSERT_EQUAL_STRING("BAD_REQUEST", w.ackFor(id)["result"]);
+  w.command(D1, "GET_STATUS");
+  w.run(50);
+  JsonDocument st = w.out.lastOf("STATUS");
+  TEST_ASSERT_EQUAL_STRING("COMET", st["front_effect"]);
+  TEST_ASSERT_EQUAL_STRING("NONE", st["transfer_effect"]);
+  TEST_ASSERT_FALSE(st["transfer_led"].as<bool>());
+  TEST_ASSERT_EQUAL(255, st["unit_color"][0].as<int>());
+  TEST_ASSERT_EQUAL(128, st["unit_color"][2].as<int>());
+}
+
 void test_command_validation() {
   World w;
   online(w);
@@ -169,6 +231,7 @@ int main() {
   RUN_TEST(test_command_validation);
   RUN_TEST(test_hello_system_id);
   RUN_TEST(test_set_mist_validation_and_status);
+  RUN_TEST(test_set_dial_effect_validation_and_status);
   RUN_TEST(test_frames_from_unknown_mac_or_wrong_id_ignored);
   RUN_TEST(test_devices_and_diag);
   RUN_TEST(test_pc_timeout_closes_session);

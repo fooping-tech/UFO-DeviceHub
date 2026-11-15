@@ -119,6 +119,42 @@ void test_payload_codecs_strict_length() {
   n = encodeTriggerEffect(te, b, sizeof(b));
   TEST_ASSERT_FALSE(decodeTriggerEffect(b + 1, n - 1, te));
 
+  SetDialEffectParams de;
+  de.effect = static_cast<uint8_t>(DialEffect::Comet);
+  de.direction = static_cast<uint8_t>(DialDirection::ToDial);
+  de.r = 10;
+  de.g = 11;
+  de.b = 12;
+  de.duration_ms = 1500;
+  de.priority = static_cast<uint8_t>(EffectPriority::High);
+  de.target = static_cast<uint8_t>(DialLedTarget::Transfer);
+  n = encodeSetDialEffect(de, b, sizeof(b));
+  const uint8_t expect_de[] = {0x23, 0x04, 0x02, 0x0A, 0x0B, 0x0C, 0xDC, 0x05, 0x02, 0x02};
+  TEST_ASSERT_EQUAL(sizeof(expect_de), n);
+  TEST_ASSERT_EQUAL_HEX8_ARRAY(expect_de, b, n);
+  SetDialEffectParams deo;
+  TEST_ASSERT_TRUE(decodeSetDialEffect(b + 1, n - 1, deo));
+  TEST_ASSERT_EQUAL(1500, deo.duration_ms);
+  TEST_ASSERT_EQUAL(12, deo.b);
+  TEST_ASSERT_FALSE(decodeSetDialEffect(b + 1, n - 2, deo));
+  b[2] = 0;  // COMET without a direction
+  TEST_ASSERT_FALSE(decodeSetDialEffect(b + 1, n - 1, deo));
+  b[2] = 3;  // unknown direction
+  TEST_ASSERT_FALSE(decodeSetDialEffect(b + 1, n - 1, deo));
+  b[2] = 2;
+  b[9] = 4;  // unknown target bit
+  TEST_ASSERT_FALSE(decodeSetDialEffect(b + 1, n - 1, deo));
+  SetDialColorParams dc;
+  dc.r = 255;
+  dc.b = 255;
+  n = encodeSetDialColor(dc, b, sizeof(b));
+  TEST_ASSERT_EQUAL(4, n);
+  TEST_ASSERT_TRUE(decodeSetDialColor(b + 1, n - 1, dc));
+  TEST_ASSERT_FALSE(decodeSetDialColor(b + 1, 2, dc));
+  TEST_ASSERT_TRUE(commandRequiresSession(static_cast<uint8_t>(CommandCode::SetDialEffect)));
+  TEST_ASSERT_TRUE(commandRequiresSession(static_cast<uint8_t>(CommandCode::SetDialColor)));
+  TEST_ASSERT_EQUAL_STRING("SET_DIAL_EFFECT", commandName(0x23));
+
   TEST_ASSERT_EQUAL(-1, commandParamLength(0x99));
   TEST_ASSERT_TRUE(commandRequiresSession(static_cast<uint8_t>(CommandCode::ReleaseBall)));
   TEST_ASSERT_TRUE(commandRequiresSession(static_cast<uint8_t>(CommandCode::RelayPulse)));
@@ -141,6 +177,20 @@ void test_status_and_heartbeat_sizes() {
   TEST_ASSERT_TRUE(decodeStatus(b, n, c2, il2, dl2));
   TEST_ASSERT_EQUAL(77, dl2.last_release_command);
   TEST_ASSERT_TRUE(n <= kMaxPayload);
+  // LED fields (fw >= 0.3) and compatibility with the 12-byte status of an older dial
+  dl.front_effect = 3;
+  dl.led_flags = 1;
+  dl.color_b = 200;
+  n = encodeStatus(c, &il, &dl, b, sizeof(b));
+  TEST_ASSERT_TRUE(decodeStatus(b, n, c2, il2, dl2));
+  TEST_ASSERT_EQUAL(3, dl2.front_effect);
+  TEST_ASSERT_EQUAL(200, dl2.color_b);
+  DialStatus old;
+  TEST_ASSERT_TRUE(decodeStatus(b, kStatusCommonSize + kDialStatusSizeV1, c2, il2, old));
+  TEST_ASSERT_EQUAL(77, old.last_release_command);
+  TEST_ASSERT_EQUAL(0, old.front_effect);
+  TEST_ASSERT_FALSE(decodeStatus(b, n - 1, c2, il2, dl2));  // any other length is still rejected
+  TEST_ASSERT_FALSE(decodeStatus(b, kStatusCommonSize + kDialStatusSizeV1 + 1, c2, il2, dl2));
   NodeHeartbeat hb;
   TEST_ASSERT_EQUAL(kNodeHeartbeatSize, encodeNodeHeartbeat(hb, b, sizeof(b)));
 }

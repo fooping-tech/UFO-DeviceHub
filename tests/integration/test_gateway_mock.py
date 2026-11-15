@@ -1,6 +1,7 @@
 """DeviceGateway (real code) against MockHub (simulated hub + devices)."""
 
 import asyncio
+import dataclasses
 import json
 import queue
 import time
@@ -41,7 +42,7 @@ class Collector:
 
 @pytest.fixture
 def rig():
-    hub = MockHub(FAST)
+    hub = MockHub(dataclasses.replace(FAST))  # own copy: a test may change the configuration
     gw = DeviceGateway(transport=hub, heartbeat_interval=0.1, hub_timeout=0.5, reconnect_interval=0.05,
                        command_timeout=1.0)
     col = Collector(gw)
@@ -392,3 +393,209 @@ def test_auto_detect_skips_port_that_is_not_a_hub():
     finally:
         gw.disconnect()
         hub.stop()
+
+
+# ---- game mode: dial LED effects (docs/game-mode-interface.md) ----------------
+def test_dial_effect_basic_and_status(rig):
+    hub, gw, col = rig
+    res = gw.set_dial_effect(D1, "CHASE", "TO_SCREEN", duration_ms=0)
+    assert res.ok and res.origin == "device"
+    led = hub.devices[D1].led("FRONT")
+    assert (led["source"], led["effect"], led["direction"]) == ("pc", "CHASE", "TO_SCREEN")
+    assert led["color"] == (0, 255, 255)  # no colour given: unit colour of dial 1 (cyan)
+    st = gw.get_status(D1)
+    assert st["front_effect"] == "CHASE" and st["transfer_effect"] == "CHASE"  # BOTH: front (G1) + G15 LED
+    assert st["transfer_led"] is True and st["unit_color"] == [0, 255, 255]
+    assert hub.devices[D1].led("TRANSFER")["direction"] == "TO_SCREEN"
+    assert hub.devices[D2].led("FRONT")["source"] == "local"  # the other dial is not touched
+    assert gw.clear_dial_effect(D1).ok
+    assert hub.devices[D1].led("FRONT")["source"] == "local"
+    assert gw.set_dial_effect(ILL, "SOLID").result == "UNSUPPORTED"  # not a dial
+
+
+def test_dial_effect_invalid_params_never_sent(rig):
+    hub, gw, col = rig
+    n = len(hub.received)
+    for bad in ({"effect": "CHASE"}, {"effect": "SOLID", "priority": "URGENT"}, {"effect": "DISCO"}):
+        with pytest.raises(ProtocolError):
+            gw.send_command(D1, "SET_DIAL_EFFECT", bad)
+    assert not [m for m in hub.received[n:] if m["type"] == "COMMAND"]
+
+
+def test_dial_effect_priority_and_expiry(rig):
+    hub, gw, col = rig
+    assert gw.set_dial_effect(D1, "FLASH", color=(255, 0, 0), duration_ms=250, priority="HIGH").ok
+    assert gw.set_dial_effect(D1, "SOLID", priority="NORMAL").result == "IGNORED_PRIORITY"
+    assert gw.clear_dial_effect(D1, priority="NORMAL").result == "IGNORED_PRIORITY"
+    assert hub.devices[D1].led("FRONT")["effect"] == "FLASH"
+    assert gw.set_dial_effect(D1, "SPARKLE", priority="HIGH").ok  # equal priority replaces
+    assert gw.set_dial_effect(D1, "FLASH", duration_ms=150, priority="HIGH").ok
+    assert wait_for(lambda: hub.devices[D1].led("FRONT")["source"] == "local", 1.0)  # duration over
+    assert gw.set_dial_effect(D1, "SOLID", priority="BACKGROUND").ok
+
+
+def test_dial_transfer_strip_not_fitted_and_fitted(rig):
+    hub, gw, col = rig
+    hub.cfg.dial_transfer_led = False  # a unit built without the G15 LED (DIAL_TRANSFER_LED_PIN -1)
+    assert gw.set_dial_effect(D1, "CHASE", "TO_DIAL", target="TRANSFER").result == "NOT_CONFIGURED"
+    assert gw.set_dial_effect(D1, "CHASE", "TO_DIAL", target="BOTH").ok  # runs on the front LED only
+    assert hub.devices[D1].led("TRANSFER")["scene"] == "OFF"
+    hub.cfg.dial_transfer_led = True  # the real machine: second LED on G15
+    assert gw.set_dial_effect(D1, "COMET", "TO_DIAL", target="TRANSFER").ok
+    assert hub.devices[D1].led("TRANSFER")["effect"] == "COMET"
+    assert hub.devices[D1].led("FRONT")["effect"] == "CHASE"  # outputs are independent
+    st = gw.get_status(D1)
+    assert st["transfer_led"] is True and st["transfer_effect"] == "COMET" and st["front_effect"] == "CHASE"
+
+
+def test_local_receive_animation_wins_then_pc_effect(rig):
+    hub, gw, col = rig
+    game_ready(gw)
+    assert gw.set_dial_effect(D1, "BREATHE", priority="HIGH").ok  # attract while waiting
+    hub.ball(D1)
+    dial = hub.devices[D1]
+    t0 = dial.detected_at
+    flash = dial.led("FRONT", now=t0 + 10)
+    assert (flash["source"], flash["effect"], flash["color"]) == ("local", "SOLID", (255, 255, 255))
+    chase = dial.led("FRONT", now=t0 + 400)  # the PC effect was dropped: local chase in the unit colour
+    assert (chase["source"], chase["effect"], chase["direction"]) == ("local", "CHASE", "TO_SCREEN")
+    assert dial.led("FRONT", now=t0 + 5000)["effect"] == "BREATHE"  # transfer shown: holding
+    col.wait("BALL_RECEIVED")
+    assert gw.set_dial_effect(D1, "CHASE", "TO_SCREEN", duration_ms=1500).ok  # the late PC effect is consistent
+    assert wait_for(lambda: dial.led("FRONT")["source"] == "pc", 1.0)  # right after the 150 ms white flash
+    led = dial.led("FRONT")
+    assert (led["direction"], led["color"]) == ("TO_SCREEN", (0, 255, 255))
+
+
+def test_left_right_simultaneous_receive_and_release(rig):
+    hub, gw, col = rig
+    for d in (D1, D2):
+        game_ready(gw, d)
+    assert hub.ball(D1) and hub.ball(D2)  # both capsules at the same time
+    evs = col.wait("BALL_RECEIVED", 2)
+    assert {e.source for e in evs} == {D1, D2}
+    for d, colour in ((D1, (0, 255, 255)), (D2, (255, 0, 255))):
+        led = hub.devices[d].led("FRONT", now=hub.devices[d].detected_at + 400)
+        assert (led["direction"], led["color"]) == ("TO_SCREEN", colour)
+    futs = {d: gw.release_ball(d, wait=False) for d in (D1, D2)}  # both released together
+    ids = {d: f.result(timeout=1.0) for d, f in futs.items()}
+    assert all(r.ok for r in ids.values())
+    for d in (D1, D2):
+        assert hub.devices[d].led("FRONT")["direction"] == "TO_DIAL"
+    done = col.wait("RELEASE_DONE", 2)
+    assert {(e.source, e.data["command_id"]) for e in done} == {(d, r.command_id) for d, r in ids.items()}
+    assert hub.devices[D1].servo_moves == hub.devices[D2].servo_moves == 1
+
+
+def test_left_right_opposite_directions(rig):
+    hub, gw, col = rig
+    for d in (D1, D2):
+        game_ready(gw, d)
+    hub.ball(D2)  # the right capsule is already in the game ...
+    col.wait("BALL_RECEIVED")
+    assert gw.set_dial_effect(D2, "COMET", "TO_DIAL").ok  # ... and returns to the right dial
+    hub.ball(D1)  # while the left dial takes a new capsule in
+    col.wait("BALL_RECEIVED", 2)
+    assert gw.set_dial_effect(D1, "CHASE", "TO_SCREEN", duration_ms=1500).ok
+    assert wait_for(lambda: hub.devices[D1].led("FRONT")["source"] == "pc", 1.0)  # after the white flash
+    left, right = hub.devices[D1].led("FRONT"), hub.devices[D2].led("FRONT")
+    assert (left["direction"], left["color"]) == ("TO_SCREEN", (0, 255, 255))
+    assert (right["direction"], right["color"]) == ("TO_DIAL", (255, 0, 255))
+    res = gw.release_ball(D2)
+    assert res.ok
+    col.wait("RELEASE_DONE")
+    assert hub.devices[D2].led("FRONT")["source"] == "local"  # the dial ends the release animation itself
+    assert hub.devices[D1].led("FRONT")["direction"] == "TO_SCREEN"  # the left side was not disturbed
+    assert hub.devices[D1].dial_state == "BALL_DETECTED" and hub.devices[D1].servo_moves == 0
+
+
+def test_effect_command_resend_is_not_reapplied(rig):
+    hub, gw, col = rig
+    hub.lose_acks(D1, 2)
+    res = gw.set_dial_effect(D1, "WIPE", "TO_DIAL", duration_ms=800)
+    assert res.ok and res.duplicate and res.attempts == 3
+    assert len(hub.devices[D1].effect_log) == 1  # applied once: the animation did not restart
+
+
+def test_effects_cleared_on_stop_session_and_link_loss(rig):
+    hub, gw, col = rig
+    assert gw.set_dial_color(D1, "#102030").ok
+    assert gw.set_dial_effect(D1, "SOLID", priority="HIGH").ok
+    assert hub.devices[D1].led("FRONT")["color"] == (16, 32, 48)
+    gw.stop_all()
+    assert hub.devices[D1].led("FRONT")["source"] == "local"
+    assert gw.set_dial_effect(D2, "SOLID", priority="HIGH").ok
+    hub.set_device_online(D2, False)  # link lost: nobody could stop the effect any more
+    assert hub.devices[D2].slots["FRONT"] is None
+    assert gw.set_dial_effect(D2, "SOLID").result == "OFFLINE"
+    assert gw.set_dial_effect(D1, "SOLID", priority="HIGH").ok
+    hub.unplug()  # PC gone -> session closed -> effects and session colour dropped
+    assert wait_for(lambda: hub.devices[D1].session == 0, 2.0)
+    assert hub.devices[D1].slots["FRONT"] is None and hub.devices[D1].color == (0, 255, 255)
+
+
+def test_stop_all_during_release_ends_effect_and_servo_once(rig):
+    hub, gw, col = rig
+    game_ready(gw)
+    hub.ball(D1)
+    col.wait("BALL_RECEIVED")
+    assert gw.set_dial_effect(D1, "COMET", "TO_DIAL").ok
+    assert gw.release_ball(D1).ok
+    gw.stop_all()
+    col.wait("RELEASE_FAILED")
+    assert hub.devices[D1].slots["FRONT"] is None and hub.devices[D1].servo_moves == 1
+    assert hub.devices[D1].dial_state == "DISABLED"
+
+
+def test_led_fault_never_blocks_release(rig):
+    hub, gw, col = rig
+    game_ready(gw)
+    hub.ball(D1)
+    col.wait("BALL_RECEIVED")
+    # every LED command fails (LED missing / lower priority): the release still runs
+    hub.cfg.dial_transfer_led = False
+    assert gw.set_dial_effect(D1, "SOLID", priority="HIGH").ok
+    assert gw.set_dial_effect(D1, "CHASE", "TO_DIAL", target="TRANSFER").result == "NOT_CONFIGURED"
+    assert gw.set_dial_effect(D1, "CHASE", "TO_DIAL").result == "IGNORED_PRIORITY"
+    assert gw.release_ball(D1).ok
+    col.wait("RELEASE_DONE")
+
+
+def test_game_mode_presets_and_trace(tmp_path):
+    from pc import TraceLog
+    from pc import game_mode as gm
+
+    hub = MockHub(FAST)
+    trace = TraceLog(tmp_path / "trace.jsonl")
+    gw = DeviceGateway(transport=hub, heartbeat_interval=0.1, hub_timeout=0.5, reconnect_interval=0.05,
+                       command_timeout=1.0, trace=trace.record)
+    col = Collector(gw)
+    assert gw.connect(timeout=2.0)
+    try:
+        game_ready(gw, gm.RIGHT)
+        hub.ball(gm.RIGHT)
+        cycle = col.wait("BALL_RECEIVED")[0].data["cycle"]
+        trace.record("game", source_dial=int(gm.RIGHT), cycle=cycle, capsule_id="c-1")
+        assert gm.play(gw, gm.RIGHT, "INTAKE").ok
+        assert gm.play(gw, gm.RIGHT, "RETURN_FLOW").ok
+        rel = gw.release_ball(gm.RIGHT)
+        col.wait("RELEASE_DONE")
+        assert gm.play(gw, gm.RIGHT, "FAULT").ok
+        assert hub.devices[gm.RIGHT].led("FRONT")["color"] == (255, 0, 0)
+        assert gm.stop(gw, gm.RIGHT).ok
+    finally:
+        gw.disconnect()
+        hub.stop()
+        trace.close()
+    recs = [json.loads(line) for line in (tmp_path / "trace.jsonl").read_text().splitlines()]
+    keys = {"t_mono", "session_id", "source_dial", "cycle", "command_id", "event_id", "event", "effect_id", "rgb",
+            "direction", "ack", "release_state"}
+    assert all(keys <= set(r) for r in recs)
+    assert [r["t_mono"] for r in recs] == sorted(r["t_mono"] for r in recs)
+    intake = next(r for r in recs if r["kind"] == "command" and r["effect_id"] == "CHASE")
+    assert (intake["source_dial"], intake["direction"], intake["cycle"]) == (0x21, "TO_SCREEN", cycle)
+    assert next(r for r in recs if r["kind"] == "ack" and r["command_id"] == intake["command_id"])["ack"] == "ACCEPTED"
+    states = [r["release_state"] for r in recs if r["kind"] == "event" and r["command_id"] == rel.command_id]
+    assert states == ["STARTED", "DONE"]
+    assert next(r for r in recs if r["kind"] == "game")["capsule_id"] == "c-1"
+    assert not [r for r in recs if r.get("command") == "GET_STATUS"]

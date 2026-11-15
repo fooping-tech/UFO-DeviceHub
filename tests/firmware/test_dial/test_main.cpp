@@ -44,8 +44,9 @@ struct Rig {
   FakeEmitter em;
   bool sw = false;
   uint32_t now = 0;
-  explicit Rig(bool abort_on_loss = false) {
+  explicit Rig(bool abort_on_loss = false, bool strip = false) {
     cfg.abort_release_on_link_loss = abort_on_loss;
+    cfg.transfer_led = strip;
     app.~DialController();
     new (&app) DialController(disp, rx, cfg);
     app.setEmitter(&em);
@@ -65,6 +66,25 @@ struct Rig {
       app.tick(sw, now);
     }
   }
+  CommandOutcome fx(DialEffect e, DialDirection d = DialDirection::None,
+                    EffectPriority pr = EffectPriority::Normal, uint16_t ms = 0,
+                    DialLedTarget target = DialLedTarget::Both, uint32_t id = 50, uint8_t red = 0, uint8_t green = 0,
+                    uint8_t blue = 0) {
+    SetDialEffectParams p;
+    p.effect = static_cast<uint8_t>(e);
+    p.direction = static_cast<uint8_t>(d);
+    p.r = red;
+    p.g = green;
+    p.b = blue;
+    p.duration_ms = ms;
+    p.priority = static_cast<uint8_t>(pr);
+    p.target = static_cast<uint8_t>(target);
+    uint8_t b[16];
+    size_t n = encodeSetDialEffect(p, b, sizeof(b));
+    return app.onCommand(CommandCode::SetDialEffect, b + 1, n - 1, id, now);
+  }
+  LedPlan ring() const { return app.ledPlan(DialLedTarget::Front, now); }
+  LedPlan strip() const { return app.ledPlan(DialLedTarget::Transfer, now); }
   void game() {
     setMode(OperationMode::Game);
     cmd(CommandCode::ArmReceiver);
@@ -414,6 +434,372 @@ void test_settings_servo_tests() {
   TEST_ASSERT_EQUAL(0, r.em.events.size());
 }
 
+// ---- game mode LEDs (docs/game-mode-interface.md) -----------------------------------
+void test_led_path_geometry() {
+  // NeoGacha arrangement: pixels 0..12 go up from the bottom, 13..25 come down from the top
+  LedGeometry folded;
+  folded.count = 26;
+  folded.layout = LedLayout::Folded;
+  TEST_ASSERT_EQUAL(13, ledPathLength(folded));
+  TEST_ASSERT_EQUAL(0, ledPathPos(folded, 0));    // bottom of the first column
+  TEST_ASSERT_EQUAL(12, ledPathPos(folded, 12));  // top of the first column
+  TEST_ASSERT_EQUAL(12, ledPathPos(folded, 13));  // top of the second column
+  TEST_ASSERT_EQUAL(1, ledPathPos(folded, 24));
+  TEST_ASSERT_EQUAL(0, ledPathPos(folded, 25));   // bottom of the second column
+  for (uint16_t i = 0; i < 13; ++i) TEST_ASSERT_EQUAL(ledPathPos(folded, i), ledPathPos(folded, 25 - i));
+  folded.reversed = true;  // the screen is at the bottom
+  TEST_ASSERT_EQUAL(12, ledPathPos(folded, 0));
+  TEST_ASSERT_EQUAL(0, ledPathPos(folded, 13));
+  LedGeometry odd;
+  odd.count = 7;
+  odd.layout = LedLayout::Folded;
+  TEST_ASSERT_EQUAL(4, ledPathLength(odd));
+  TEST_ASSERT_EQUAL(3, ledPathPos(odd, 3));  // the single pixel at the top
+  TEST_ASSERT_EQUAL(2, ledPathPos(odd, 4));
+  // a chase TO_SCREEN lights the same height in both columns and climbs
+  for (uint32_t step = 0; step < 4; ++step)
+    for (uint16_t i = 0; i < 13; ++i) {
+      folded.reversed = false;
+      uint8_t up = dialEffectLevel(DialEffect::Chase, DialDirection::ToScreen, ledPathPos(folded, i), 13,
+                                   step * kChaseStepMs, 0);
+      uint8_t down = dialEffectLevel(DialEffect::Chase, DialDirection::ToScreen, ledPathPos(folded, 25 - i), 13,
+                                     step * kChaseStepMs, 0);
+      TEST_ASSERT_EQUAL(up, down);
+    }
+  LedGeometry strip;
+  strip.count = 30;
+  TEST_ASSERT_EQUAL(30, ledPathLength(strip));
+  TEST_ASSERT_EQUAL(0, ledPathPos(strip, 0));
+  strip.reversed = true;
+  TEST_ASSERT_EQUAL(29, ledPathPos(strip, 0));
+  LedGeometry none;
+  TEST_ASSERT_EQUAL(0, ledPathLength(none));
+  TEST_ASSERT_EQUAL(0, dialEffectLevel(DialEffect::Solid, DialDirection::None, 0, 0, 0, 0));
+}
+
+// position of the first fully lit pixel
+static int litPos(DialEffect e, DialDirection d, uint32_t t, uint16_t len = 12) {
+  for (uint16_t p = 0; p < len; ++p)
+    if (dialEffectLevel(e, d, p, len, t, 0) == 255) return p;
+  return -1;
+}
+
+void test_led_direction_of_flow() {
+  // CHASE: the lit pixels move up the path TO_SCREEN and down TO_DIAL
+  TEST_ASSERT_EQUAL(0, litPos(DialEffect::Chase, DialDirection::ToScreen, 0));
+  TEST_ASSERT_EQUAL(1, litPos(DialEffect::Chase, DialDirection::ToScreen, kChaseStepMs));
+  TEST_ASSERT_EQUAL(2, litPos(DialEffect::Chase, DialDirection::ToScreen, 2 * kChaseStepMs));
+  TEST_ASSERT_EQUAL(3, litPos(DialEffect::Chase, DialDirection::ToDial, 0));  // 11, 7, 3
+  TEST_ASSERT_EQUAL(2, litPos(DialEffect::Chase, DialDirection::ToDial, kChaseStepMs));
+  TEST_ASSERT_EQUAL(1, litPos(DialEffect::Chase, DialDirection::ToDial, 2 * kChaseStepMs));
+  // COMET: one head; it starts at the dial end TO_SCREEN and at the screen end TO_DIAL
+  TEST_ASSERT_EQUAL(0, litPos(DialEffect::Comet, DialDirection::ToScreen, 0));
+  TEST_ASSERT_EQUAL(11, litPos(DialEffect::Comet, DialDirection::ToDial, 0));
+  int mid_up = litPos(DialEffect::Comet, DialDirection::ToScreen, kCometPeriodMs / 2);
+  int mid_down = litPos(DialEffect::Comet, DialDirection::ToDial, kCometPeriodMs / 2);
+  TEST_ASSERT_TRUE(mid_up > 0 && mid_down < 11);
+  TEST_ASSERT_EQUAL(11, mid_up + mid_down);  // mirror images
+  // the tail is behind the head (towards the source)
+  TEST_ASSERT_TRUE(dialEffectLevel(DialEffect::Comet, DialDirection::ToScreen, mid_up - 1, 12, kCometPeriodMs / 2, 0) > 0);
+  TEST_ASSERT_EQUAL(0, dialEffectLevel(DialEffect::Comet, DialDirection::ToScreen, mid_up + 1, 12, kCometPeriodMs / 2, 0));
+  // WIPE fills from the source end over duration_ms and stays full
+  TEST_ASSERT_EQUAL(0, dialEffectLevel(DialEffect::Wipe, DialDirection::ToScreen, 0, 10, 0, 1000));
+  TEST_ASSERT_EQUAL(255, dialEffectLevel(DialEffect::Wipe, DialDirection::ToScreen, 4, 10, 500, 1000));
+  TEST_ASSERT_EQUAL(0, dialEffectLevel(DialEffect::Wipe, DialDirection::ToScreen, 5, 10, 500, 1000));
+  TEST_ASSERT_EQUAL(255, dialEffectLevel(DialEffect::Wipe, DialDirection::ToDial, 5, 10, 500, 1000));
+  TEST_ASSERT_EQUAL(0, dialEffectLevel(DialEffect::Wipe, DialDirection::ToDial, 4, 10, 500, 1000));
+  TEST_ASSERT_EQUAL(255, dialEffectLevel(DialEffect::Wipe, DialDirection::ToScreen, 9, 10, 5000, 1000));
+  TEST_ASSERT_EQUAL(255, dialEffectLevel(DialEffect::Flash, DialDirection::None, 3, 10, 0, 0));
+  TEST_ASSERT_EQUAL(0, dialEffectLevel(DialEffect::Flash, DialDirection::None, 3, 10, kFlashPeriodMs / 2, 0));
+  TEST_ASSERT_EQUAL(0, dialEffectLevel(DialEffect::None, DialDirection::None, 3, 10, 0, 0));
+}
+
+void test_dial_effect_accepted_and_shown() {
+  Rig r;
+  TEST_ASSERT_EQUAL(LedScene::Idle, r.ring().scene);  // DISABLED: device display
+  r.now = 1000;
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.fx(DialEffect::Comet, DialDirection::ToDial).result);
+  r.now = 1200;
+  LedPlan p = r.ring();
+  TEST_ASSERT_EQUAL(LedScene::Effect, p.scene);
+  TEST_ASSERT_TRUE(p.from_pc);
+  TEST_ASSERT_EQUAL(DialEffect::Comet, p.effect);
+  TEST_ASSERT_EQUAL(DialDirection::ToDial, p.direction);
+  TEST_ASSERT_EQUAL(200, p.elapsed_ms);
+  TEST_ASSERT_EQUAL(0, p.r);  // no colour in the command: unit colour (default cyan)
+  TEST_ASSERT_EQUAL(255, p.g);
+  TEST_ASSERT_EQUAL(255, p.b);
+  TEST_ASSERT_EQUAL(LedScene::Off, r.strip().scene);  // no strip fitted
+  // explicit colour
+  r.fx(DialEffect::Solid, DialDirection::None, EffectPriority::Normal, 0, DialLedTarget::Both, 51, 10, 20, 30);
+  p = r.ring();
+  TEST_ASSERT_EQUAL(10, p.r);
+  TEST_ASSERT_EQUAL(30, p.b);
+  // NONE stops it: back to the device display
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.fx(DialEffect::None).result);
+  TEST_ASSERT_EQUAL(LedScene::Idle, r.ring().scene);
+  // status
+  r.fx(DialEffect::Sparkle);
+  IlluminationStatus il;
+  DialStatus dl;
+  r.app.fillStatus(il, dl);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(DialEffect::Sparkle), dl.front_effect);
+  TEST_ASSERT_EQUAL(0, dl.transfer_effect);
+  TEST_ASSERT_EQUAL(0, dl.led_flags);
+  TEST_ASSERT_EQUAL(255, dl.color_g);
+}
+
+void test_dial_effect_invalid_params() {
+  Rig r;
+  TEST_ASSERT_EQUAL(AckResult::InvalidParams, r.fx(DialEffect::Chase).result);  // needs a direction
+  TEST_ASSERT_EQUAL(AckResult::InvalidParams, r.fx(DialEffect::Wipe, DialDirection::None).result);
+  uint8_t raw[9] = {8, 0, 0, 0, 0, 0, 0, 1, 3};  // unknown effect
+  TEST_ASSERT_EQUAL(AckResult::InvalidParams, r.app.onCommand(CommandCode::SetDialEffect, raw, 9, 1, 0).result);
+  uint8_t prio[9] = {1, 0, 0, 0, 0, 0, 0, 3, 3};  // unknown priority
+  TEST_ASSERT_EQUAL(AckResult::InvalidParams, r.app.onCommand(CommandCode::SetDialEffect, prio, 9, 1, 0).result);
+  uint8_t tgt[9] = {1, 0, 0, 0, 0, 0, 0, 1, 0};  // no target
+  TEST_ASSERT_EQUAL(AckResult::InvalidParams, r.app.onCommand(CommandCode::SetDialEffect, tgt, 9, 1, 0).result);
+  TEST_ASSERT_EQUAL(AckResult::InvalidParams, r.app.onCommand(CommandCode::SetDialEffect, tgt, 8, 1, 0).result);
+  TEST_ASSERT_EQUAL(LedScene::Idle, r.ring().scene);
+}
+
+void test_dial_effect_priority_and_duration() {
+  Rig r;
+  r.now = 100;
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.fx(DialEffect::Flash, DialDirection::None, EffectPriority::High, 500).result);
+  TEST_ASSERT_EQUAL(AckResult::IgnoredPriority, r.fx(DialEffect::Solid).result);
+  TEST_ASSERT_EQUAL(AckResult::IgnoredPriority, r.fx(DialEffect::None).result);  // a low priority stop too
+  TEST_ASSERT_EQUAL(DialEffect::Flash, r.ring().effect);
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.fx(DialEffect::Sparkle, DialDirection::None, EffectPriority::High, 500).result);
+  r.run(495);
+  TEST_ASSERT_EQUAL(DialEffect::Sparkle, r.ring().effect);
+  r.run(10);  // duration over: device display again, lower priorities are free
+  TEST_ASSERT_EQUAL(LedScene::Idle, r.ring().scene);
+  IlluminationStatus il;
+  DialStatus dl;
+  r.app.fillStatus(il, dl);
+  TEST_ASSERT_EQUAL(0, dl.front_effect);
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.fx(DialEffect::Solid, DialDirection::None, EffectPriority::Background).result);
+}
+
+void test_transfer_strip_optional() {
+  Rig ring_only;
+  TEST_ASSERT_EQUAL(AckResult::NotConfigured,
+                    ring_only.fx(DialEffect::Chase, DialDirection::ToDial, EffectPriority::Normal, 0,
+                                 DialLedTarget::Transfer).result);
+  TEST_ASSERT_EQUAL(AckResult::Accepted, ring_only.fx(DialEffect::Chase, DialDirection::ToDial).result);  // BOTH
+  TEST_ASSERT_EQUAL(DialEffect::Chase, ring_only.ring().effect);
+  TEST_ASSERT_EQUAL(LedScene::Off, ring_only.strip().scene);
+
+  Rig r(false, true);  // strip fitted
+  TEST_ASSERT_EQUAL(LedScene::Off, r.strip().scene);  // dark until an effect runs
+  TEST_ASSERT_EQUAL(AckResult::Accepted,
+                    r.fx(DialEffect::Comet, DialDirection::ToDial, EffectPriority::High, 0, DialLedTarget::Transfer).result);
+  TEST_ASSERT_EQUAL(DialEffect::Comet, r.strip().effect);
+  TEST_ASSERT_EQUAL(LedScene::Idle, r.ring().scene);  // outputs are independent
+  // BOTH is all or nothing: the strip's HIGH effect blocks a NORMAL one for both outputs
+  TEST_ASSERT_EQUAL(AckResult::IgnoredPriority, r.fx(DialEffect::Solid).result);
+  TEST_ASSERT_EQUAL(LedScene::Idle, r.ring().scene);
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.fx(DialEffect::Solid, DialDirection::None, EffectPriority::Normal, 0,
+                                             DialLedTarget::Front).result);
+  IlluminationStatus il;
+  DialStatus dl;
+  r.app.fillStatus(il, dl);
+  TEST_ASSERT_EQUAL(u8(DialLedFlag::TransferFitted), dl.led_flags);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(DialEffect::Comet), dl.transfer_effect);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(DialEffect::Solid), dl.front_effect);
+}
+
+void test_local_receive_animation() {
+  Rig r(false, true);
+  r.game();
+  TEST_ASSERT_EQUAL(LedScene::Armed, r.ring().scene);
+  r.fx(DialEffect::Breathe, DialDirection::None, EffectPriority::High);  // PC attract effect while waiting
+  r.sw = true;
+  r.run(35);  // debounce -> BALL_DETECTED
+  TEST_ASSERT_EQUAL(DialState::BallDetected, r.app.dialState());
+  // at once, before the PC knows: white flash on both outputs, the PC effect is gone
+  for (LedPlan p : {r.ring(), r.strip()}) {
+    TEST_ASSERT_EQUAL(LedScene::Effect, p.scene);
+    TEST_ASSERT_FALSE(p.from_pc);
+    TEST_ASSERT_EQUAL(DialEffect::Solid, p.effect);
+    TEST_ASSERT_EQUAL(255, p.r);
+  }
+  r.run(200);  // then the unit colour runs to the screen
+  for (LedPlan p : {r.ring(), r.strip()}) {
+    TEST_ASSERT_EQUAL(DialEffect::Chase, p.effect);
+    TEST_ASSERT_EQUAL(DialDirection::ToScreen, p.direction);
+    TEST_ASSERT_EQUAL(0, p.r);
+    TEST_ASSERT_EQUAL(255, p.b);
+    TEST_ASSERT_FALSE(p.from_pc);
+  }
+  // the PC effect that arrives after BALL_RECEIVED takes over (same look, PC timing)
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.fx(DialEffect::Chase, DialDirection::ToScreen, EffectPriority::Normal, 800).result);
+  TEST_ASSERT_TRUE(r.ring().from_pc);
+  r.run(900);  // PC effect over, local chase time (1500 ms) not yet
+  TEST_ASSERT_FALSE(r.ring().from_pc);
+  TEST_ASSERT_EQUAL(DialEffect::Chase, r.ring().effect);
+  r.run(1000);  // transfer shown: holding display until RELEASE_BALL
+  TEST_ASSERT_EQUAL(DialEffect::Breathe, r.ring().effect);
+  TEST_ASSERT_EQUAL(1, r.em.count(EventCode::BallReceived));
+}
+
+void test_pc_effect_during_flash_waits_for_flash() {
+  Rig r;
+  r.game();
+  r.sw = true;
+  r.run(35);
+  r.fx(DialEffect::Chase, DialDirection::ToScreen);  // arrives within the 150 ms flash
+  TEST_ASSERT_EQUAL(DialEffect::Solid, r.ring().effect);
+  TEST_ASSERT_FALSE(r.ring().from_pc);
+  r.run(160);
+  TEST_ASSERT_TRUE(r.ring().from_pc);
+}
+
+void test_release_animation_and_end() {
+  Rig r;
+  r.game();
+  r.dropBall();
+  r.run(3000);
+  // the game starts the return flow before RELEASE_BALL
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.fx(DialEffect::Comet, DialDirection::ToDial).result);
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.cmd(CommandCode::ReleaseBall, 900).result);
+  TEST_ASSERT_EQUAL(DialEffect::Comet, r.ring().effect);  // the PC effect keeps running
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.fx(DialEffect::None).result);
+  LedPlan p = r.ring();  // device's own release animation: unit colour towards the dial
+  TEST_ASSERT_EQUAL(DialEffect::Chase, p.effect);
+  TEST_ASSERT_EQUAL(DialDirection::ToDial, p.direction);
+  TEST_ASSERT_FALSE(p.from_pc);
+  r.fx(DialEffect::Chase, DialDirection::ToDial, EffectPriority::High);
+  r.run(2200);  // RELEASE_DONE: the device ends the animation, even a HIGH one
+  TEST_ASSERT_EQUAL(1, r.em.count(EventCode::ReleaseDone));
+  TEST_ASSERT_EQUAL(LedScene::Complete, r.ring().scene);
+  TEST_ASSERT_EQUAL(1, r.servo.count(0));
+}
+
+void test_effects_never_change_the_release_sequence() {
+  Rig plain, lit;
+  for (Rig* r : {&plain, &lit}) {
+    r->game();
+    r->dropBall();
+  }
+  lit.fx(DialEffect::Flash, DialDirection::None, EffectPriority::High);
+  lit.fx(DialEffect::Chase, DialDirection::ToDial, EffectPriority::Normal, 0, DialLedTarget::Transfer);  // NOT_CONFIGURED
+  for (Rig* r : {&plain, &lit}) {
+    TEST_ASSERT_EQUAL(AckResult::Accepted, r->cmd(CommandCode::ReleaseBall, 7).result);
+    r->run(3000);
+  }
+  TEST_ASSERT_EQUAL(plain.servo.writes.size(), lit.servo.writes.size());
+  TEST_ASSERT_EQUAL(plain.em.events.back().elapsed_ms, lit.em.events.back().elapsed_ms);
+  TEST_ASSERT_EQUAL(1, lit.em.count(EventCode::ReleaseDone));
+}
+
+void test_effects_cleared_by_safety_events() {
+  {
+    Rig r;  // STOP_ALL
+    r.fx(DialEffect::Solid, DialDirection::None, EffectPriority::High);
+    r.cmd(CommandCode::StopAll);
+    TEST_ASSERT_EQUAL(LedScene::Idle, r.ring().scene);
+  }
+  {
+    Rig r;  // STOP_ALL during a release: effect off now, servo back to standby
+    r.game();
+    r.dropBall();
+    r.fx(DialEffect::Comet, DialDirection::ToDial, EffectPriority::High);
+    r.cmd(CommandCode::ReleaseBall, 5);
+    r.run(100);
+    r.cmd(CommandCode::StopAll, 6);
+    TEST_ASSERT_FALSE(r.ring().from_pc);
+    r.run(1000);
+    TEST_ASSERT_EQUAL(1, r.em.count(EventCode::ReleaseFailed));
+    TEST_ASSERT_EQUAL(LedScene::Idle, r.ring().scene);
+  }
+  {
+    Rig r;  // session change: effect and session colour gone
+    uint8_t col[3] = {9, 8, 7};
+    TEST_ASSERT_EQUAL(AckResult::Accepted, r.app.onCommand(CommandCode::SetDialColor, col, 3, 1, 0).result);
+    r.fx(DialEffect::Solid);
+    TEST_ASSERT_EQUAL(9, r.ring().r);
+    r.app.onSessionChanged(0, r.now);
+    TEST_ASSERT_EQUAL(LedScene::Idle, r.ring().scene);
+    uint8_t cr, cg, cb;
+    r.app.unitColor(cr, cg, cb);
+    TEST_ASSERT_EQUAL(0, cr);
+    TEST_ASSERT_EQUAL(255, cg);
+  }
+  {
+    Rig r;  // hub link lost: link display, effect dropped and not resumed
+    r.fx(DialEffect::Solid, DialDirection::None, EffectPriority::High);
+    r.app.onHubLinkChanged(false, r.now);
+    TEST_ASSERT_EQUAL(LedScene::LinkLost, r.ring().scene);
+    r.app.onHubLinkChanged(true, r.now);
+    TEST_ASSERT_EQUAL(LedScene::Idle, r.ring().scene);
+  }
+  {
+    Rig r;  // settings mode: the person at the device owns the LEDs
+    r.fx(DialEffect::Solid);
+    r.app.enterSettings(r.now);
+    TEST_ASSERT_EQUAL(LedScene::Settings, r.ring().scene);
+    TEST_ASSERT_EQUAL(AckResult::RejectedState, r.fx(DialEffect::Solid).result);
+    r.app.exitSettings(r.now);
+    TEST_ASSERT_EQUAL(LedScene::Idle, r.ring().scene);
+  }
+  {
+    Rig r;  // configuration error: the error display is never covered
+    r.app.setConfigError(ErrorCode::ServoNotConfigured);
+    TEST_ASSERT_EQUAL(AckResult::RejectedState, r.fx(DialEffect::Solid).result);
+    TEST_ASSERT_EQUAL(LedScene::Error, r.ring().scene);
+  }
+}
+
+void test_set_dial_color() {
+  Rig r;
+  uint8_t magenta[3] = {255, 0, 255};
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.app.onCommand(CommandCode::SetDialColor, magenta, 3, 1, 0).result);
+  TEST_ASSERT_EQUAL(AckResult::InvalidParams, r.app.onCommand(CommandCode::SetDialColor, magenta, 2, 2, 0).result);
+  r.game();
+  TEST_ASSERT_EQUAL(255, r.ring().r);  // ARMED display in the unit colour
+  r.sw = true;
+  r.run(300);
+  TEST_ASSERT_EQUAL(DialEffect::Chase, r.ring().effect);  // local receive chase in the unit colour
+  TEST_ASSERT_EQUAL(255, r.ring().r);
+  TEST_ASSERT_EQUAL(0, r.ring().g);
+  uint8_t zero[3] = {0, 0, 0};  // back to the configured default
+  r.app.onCommand(CommandCode::SetDialColor, zero, 3, 3, r.now);
+  TEST_ASSERT_EQUAL(0, r.ring().r);
+  TEST_ASSERT_EQUAL(255, r.ring().g);
+}
+
+void test_duplicate_effect_command_does_not_restart_animation() {
+  Rig r;
+  FakeNodeTransport tx;
+  NodeConfig cfg;
+  cfg.self_id = kSelf;
+  memcpy(cfg.hub_mac, hubMac(), 6);
+  NodeCore core(cfg, tx, r.app);
+  core.begin(0, 1, 1);
+  auto feed = [&](const std::vector<uint8_t>& f) { core.onFrame(hubMac(), f.data(), f.size(), 0, r.now); };
+  SetDialEffectParams p;
+  p.effect = static_cast<uint8_t>(DialEffect::Wipe);
+  p.direction = static_cast<uint8_t>(DialDirection::ToDial);
+  p.duration_ms = 1000;
+  uint8_t pl[16];
+  size_t n = encodeSetDialEffect(p, pl, sizeof(pl));
+  auto frame = commandFrame(kSelf, 3, 20, pl, n);
+  feed(frame);  // no session yet
+  TEST_ASSERT_EQUAL(u8(AckResult::RejectedSession), ackOf(tx.last(MsgType::Ack)).result);
+  TEST_ASSERT_EQUAL(LedScene::Idle, r.ring().scene);
+  feed(simpleCommand(kSelf, 3, 0x80000001, CommandCode::SessionBegin));
+  feed(frame);
+  TEST_ASSERT_EQUAL(u8(AckResult::Accepted), ackOf(tx.last(MsgType::Ack)).result);
+  r.run(400);
+  feed(frame);  // retransmission (the ACK was lost)
+  TEST_ASSERT_TRUE(ackOf(tx.last(MsgType::Ack)).flags & u8(AckFlag::Duplicate));
+  TEST_ASSERT_EQUAL(400, r.ring().elapsed_ms);  // not restarted
+  feed(commandFrame(kSelf, 9, 21, pl, n));  // a command of an old session
+  TEST_ASSERT_EQUAL(u8(AckResult::RejectedSession), ackOf(tx.last(MsgType::Ack)).result);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_boot_safe_state);
@@ -436,5 +822,18 @@ int main() {
   RUN_TEST(test_settings_switch_counts_without_events);
   RUN_TEST(test_settings_rejects_pc_commands_but_stop_all_leaves);
   RUN_TEST(test_settings_servo_tests);
+  RUN_TEST(test_led_path_geometry);
+  RUN_TEST(test_led_direction_of_flow);
+  RUN_TEST(test_dial_effect_accepted_and_shown);
+  RUN_TEST(test_dial_effect_invalid_params);
+  RUN_TEST(test_dial_effect_priority_and_duration);
+  RUN_TEST(test_transfer_strip_optional);
+  RUN_TEST(test_local_receive_animation);
+  RUN_TEST(test_pc_effect_during_flash_waits_for_flash);
+  RUN_TEST(test_release_animation_and_end);
+  RUN_TEST(test_effects_never_change_the_release_sequence);
+  RUN_TEST(test_effects_cleared_by_safety_events);
+  RUN_TEST(test_set_dial_color);
+  RUN_TEST(test_duplicate_effect_command_does_not_restart_animation);
   return UNITY_END();
 }

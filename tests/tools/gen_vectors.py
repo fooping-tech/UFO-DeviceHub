@@ -66,6 +66,14 @@ def main() -> None:
                                       P.encode_event_payload(EventCode.MIST_DONE, on_s=95, reason=0))),
         vec("system2_set_light_mode", Packet(0x01, 0x10, MsgType.COMMAND, 17, S, 1007, P.encode_command_payload(
             "SET_LIGHT_MODE", {"mode": "AURORA", "brightness": 160}), magic=P.system_magic(2))),
+        vec("set_dial_effect_to_screen", Packet(0x01, 0x20, MsgType.COMMAND, 18, S, 1008, P.encode_command_payload(
+            "SET_DIAL_EFFECT", {"effect": "CHASE", "direction": "TO_SCREEN", "color": [0, 255, 255],
+                                "duration_ms": 1500, "priority": "NORMAL", "target": "BOTH"}))),
+        vec("set_dial_effect_to_dial_strip", Packet(0x01, 0x21, MsgType.COMMAND, 19, S, 1009, P.encode_command_payload(
+            "SET_DIAL_EFFECT", {"effect": "COMET", "direction": "TO_DIAL", "priority": "HIGH",
+                                "target": "TRANSFER"}))),
+        vec("set_dial_color", Packet(0x01, 0x21, MsgType.COMMAND, 20, S, 1010, P.encode_command_payload(
+            "SET_DIAL_COLOR", {"color": "#FF00FF"}))),
         vec("hub_heartbeat", Packet(0x01, 0x10, MsgType.HEARTBEAT, 12, S, 0, P.encode_hub_heartbeat(123456, 1))),
         vec("node_heartbeat", Packet(0x10, 0x01, MsgType.HEARTBEAT, 13, S, 0,
                                      P.encode_node_heartbeat(12, 0xCAFEBABE, 99999, 2, 0, 0x03, -55, 4, (0, 1)))),
