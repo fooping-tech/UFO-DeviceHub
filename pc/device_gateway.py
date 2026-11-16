@@ -94,21 +94,41 @@ def guess_port(exclude: Iterable[str] = ()) -> str | None:
 class SerialLineTransport:
     """pyserial based transport with framing and a maximum line length."""
 
-    def __init__(self, port: str = "auto", baudrate: int = 115200, max_line: int = 4096) -> None:
+    def __init__(self, port: str = "auto", baudrate: int = 115200, max_line: int = 4096, *,
+                 exclude: Iterable[str] = (), exclusive: bool = False) -> None:
+        """exclude: ports that are never opened (another device's, e.g. a robot controller on
+        the same PC): auto-detect skips them and naming one is refused. The set may be added
+        to later. exclusive: open the port for this program only (POSIX; Windows always does)."""
         self.port = port
         self.baudrate = baudrate
         self.max_line = max_line  # hub -> PC lines (DIAG can be ~1.5 kB)
+        self.exclude: set[str] = {p for p in exclude if p}
+        self.exclusive = exclusive
         self._ser = None
         self._buf = bytearray()
         self._discarding = False
         self.oversize_lines = 0
         self.current_port: str | None = None
-        self._rejected: set[str] = set()  # auto mode: hubs of another UFO system
+        self._rejected: set[str] = set()  # auto mode: not a hub, another system's hub, or it did not open
+        # why the last open() failed, for a caller's screen (DeviceGateway.link_diagnostics):
+        # "" = it opened, "no_port" / "excluded" / "open_failed"
+        self.open_error_kind = ""
+        self.open_error = ""
+        # the last port the gateway gave up (no hub handshake, or another system's hub)
+        self.rejected_port = ""
+        self.rejected_at = 0.0
 
     def reject_current(self) -> None:
-        """Auto mode: the open port is the hub of another system - try the others."""
+        """The open port is not this system's hub. Auto mode: try the others."""
+        self.rejected_port = self.current_port or ""
+        self.rejected_at = time.monotonic()
         if self.port == "auto" and self.current_port:
             self._rejected.add(self.current_port)
+
+    def _open_failed(self, kind: str, text: str) -> TransportError:
+        self.open_error_kind = kind
+        self.open_error = text
+        return TransportError(text)
 
     def open(self) -> None:
         try:
@@ -116,21 +136,29 @@ class SerialLineTransport:
         except ImportError as e:  # pragma: no cover
             raise TransportError("pyserial is not installed (pip install -r pc/requirements.txt)") from e
         if self.port == "auto":
-            port = guess_port(self._rejected)
+            port = guess_port(self._rejected | self.exclude)
             if not port and self._rejected:
                 self._rejected.clear()  # every hub refused: start over (a hub may have been re-flashed)
-                port = guess_port()
+                port = guess_port(self.exclude)
         else:
             port = self.port
+            if port in self.exclude:
+                raise self._open_failed("excluded", f"{port} is excluded (another device's port, not the hub's)")
         if not port:
-            raise TransportError("no serial port found")
+            raise self._open_failed("no_port", "no serial port found")
         self.current_port = port
         try:
             # timeouts: reads never block forever, writes fail instead of hanging
-            self._ser = serial.Serial(port, self.baudrate, timeout=0.05, write_timeout=1.0)
+            more = {"exclusive": True} if self.exclusive else {}
+            self._ser = serial.Serial(port, self.baudrate, timeout=0.05, write_timeout=1.0, **more)
             self._ser.reset_input_buffer()
-        except (OSError, serial.SerialException) as e:
-            raise TransportError(str(e)) from e
+        except (OSError, serial.SerialException, ValueError) as e:
+            if self.port == "auto":
+                # the next attempt tries the other candidates (a port another program holds, first
+                # in the list, must not hide the hub); when all are refused the list starts over
+                self._rejected.add(port)
+            raise self._open_failed("open_failed", f"{port}: {e}") from e
+        self.open_error_kind = self.open_error = ""
         self._buf.clear()
         self._discarding = False
         log.info("serial open %s @ %d", port, self.baudrate)
@@ -233,6 +261,8 @@ class DeviceGateway:
         self._last_hb = 0.0
         self._handshake_since = 0.0  # port opened / session lost: HELLO_ACK expected within hub_timeout
         self.hub_info: dict = {}
+        self._wrong_system_detail = ""  # the last hub refused as another UFO system's
+        self._wrong_system_at = 0.0
         self.stats = {"events": 0, "duplicate_events": 0, "stale_events": 0, "reconnects": 0, "bad_lines": 0}
 
     # ---- lifecycle ---------------------------------------------------------
@@ -270,6 +300,29 @@ class DeviceGateway:
 
     def __exit__(self, *exc) -> None:
         self.disconnect()
+
+    def link_diagnostics(self) -> dict:
+        """Why there is (not) a session, for a caller's screen. Read only: nothing is sent.
+
+        port: the port in use or last tried. open_error_kind / open_error: why the port did not
+        open ("" = it did; "no_port", "excluded", "open_failed"). rejected_port / rejected_age_s:
+        the last port given up (no hub handshake, another system's hub) and how long ago.
+        wrong_system / wrong_system_age_s: the last hub that belongs to another UFO system.
+        Ages are None when it never happened. A transport without these facts gives defaults."""
+        t = self._transport
+        now = time.monotonic()
+        rejected_at = float(getattr(t, "rejected_at", 0.0) or 0.0)
+        return {
+            "connected": self.connected,
+            "system_id": self.system_id,
+            "port": getattr(t, "current_port", None),
+            "open_error_kind": str(getattr(t, "open_error_kind", "") or ""),
+            "open_error": str(getattr(t, "open_error", "") or ""),
+            "rejected_port": str(getattr(t, "rejected_port", "") or ""),
+            "rejected_age_s": now - rejected_at if rejected_at else None,
+            "wrong_system": self._wrong_system_detail,
+            "wrong_system_age_s": now - self._wrong_system_at if self._wrong_system_at else None,
+        }
 
     @property
     def connected(self) -> bool:
@@ -784,6 +837,8 @@ class DeviceGateway:
             self._new_session()
 
     def _wrong_system(self, detail: str) -> None:
+        self._wrong_system_detail = detail
+        self._wrong_system_at = time.monotonic()
         log.error("this hub belongs to another UFO system (%s), want system %s", detail, self.system_id)
         reject = getattr(self._transport, "reject_current", None)
         if reject:

@@ -1,0 +1,30 @@
+# The PC client of the UFO device hub as an installable Python package.
+#
+# Only pc/ (the gateway, the protocol, the mock hub, the trace, the test console) and its
+# stable import name ufo_devicehub/ are packaged. The firmware, PlatformIO and config/
+# (keys, MAC addresses) are never part of the Python install.
+#
+# Not published: another project uses it as a local path dependency, e.g. with uv
+#   [tool.uv.sources]
+#   ufo-devicehub = { path = "../external/UFO-DeviceHub", editable = true }
+# (editable: an edit here is seen the next time that project's Python process starts).
+[project]
+name = "ufo-devicehub"
+version = "0.3.0"
+description = "PC client of the UFO device hub (ESP-NOW hub over USB serial): gateway, protocol, mock hub."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["pyserial>=3.5"]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["pc", "ufo_devicehub"]
+
+[tool.hatch.build.targets.sdist]
+include = ["pc", "ufo_devicehub", "README.md", "pyproject.toml"]

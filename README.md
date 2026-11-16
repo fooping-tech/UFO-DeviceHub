@@ -125,7 +125,8 @@ ATOM Lite + Atomic PWM Base + Unit 2Relay。旧 `atom_led_mist` スケッチの�
 
 ```sh
 pio test -e native                                              # ファームウェアのロジック 81 件
-uv run --no-project --with pyserial --with pytest python -m pytest    # Python 105 件（Mock 使用）
+uv run pytest                                                   # Python 145 件（Mock 使用）
+# uv のプロジェクトを使わない書き方も通る: uv run --no-project --with pyserial --with pytest python -m pytest
 ```
 
 ## PC から使う
@@ -163,12 +164,38 @@ python3 -m pc.web_console --port mock                      # ハードウェア�
 手動操作・現地診断: `python3 tests/tools/ufo_cli.py --system 1 --port auto devices|diag|probe|light|effect|mist|steam|game|release|stop|monitor`
 （`--port mock` でハードウェアなし）
 
+## ほかのプロジェクトから Python パッケージとして使う
+
+PC 側のコード（`pc/`）は、`pyproject.toml` でインストールできるパッケージ `ufo-devicehub` になっています。ゲームなどほかのプロジェクトは、このリポジトリのコードをコピーせず、依存として使います。公開（PyPI など）はしていません。
+
+```toml
+# 使う側の pyproject.toml（uv）。パスはこのリポジトリを clone した場所
+[project]
+dependencies = ["ufo-devicehub"]
+
+[tool.uv.sources]
+ufo-devicehub = { path = "../external/UFO-DeviceHub", editable = true }
+```
+
+```python
+from ufo_devicehub import DeviceGateway, MockConfig, MockHub, SerialLineTransport, TraceLog
+from ufo_devicehub import protocol as P
+```
+
+- **import 名は `ufo_devicehub`** を使ってください（公開 API は `ufo_devicehub/__init__.py` の `__all__`）。中身は `pc` にあり、`from pc import ...` と `python -m pc.web_console` はそのまま使えます。
+- editable なので、ここの Python コードを直すと、使う側の**次の Python プロセスの起動から**反映されます（`uv sync` のやり直しは不要。依存を足したときだけ必要）。ファームウェアを変えたときは書き込みが必要です。
+- パッケージに入るのは `pc/` と `ufo_devicehub/` だけです。ファームウェア、PlatformIO、`config/`（鍵・MAC アドレス）は入りません。
+- 同じ PC に別の USB シリアル機器がある場合（ロボットの制御基板など）は、`SerialLineTransport(port, exclude=[...], exclusive=True)` でそのポートを開かないようにできます。つながらない理由は `DeviceGateway.link_diagnostics()` で読めます（読むだけで、何も送りません）。
+- プロトコルの約束は変わりません: ACK は処理の完了ではありません。`RELEASE_BALL` は自動で再送されません。USB が抜けただけで機器が止まるとは限りません。
+
 ## ディレクトリ
 
 ```
 shared/        共通プロトコル（パケット、payload、信頼性、子機コア、ESP-NOW、LED 演出）
 firmware/      hub/（AtomS3R 画面表示を含む）, illumination/（LED・COB・ミスト・ボタン）, m5dial/
 config/        *.example.h（実設定はコピーして作成）
+pyproject.toml Python パッケージ ufo-devicehub の定義（pc/ と ufo_devicehub/ だけを含む）
+ufo_devicehub/ ほかのプロジェクトが使う import 名（公開 API。中身は pc/）
 pc/            protocol.py, device_gateway.py, mock_hub.py, game_mode.py（ゲームモード演出）, trace.py（トレースログ）, web_console.py + web/（ブラウザ試験画面）
 tests/         firmware/（Unity, native）, protocol/, integration/（pytest）, tools/
 docs/
