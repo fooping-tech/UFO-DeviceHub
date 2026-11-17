@@ -99,6 +99,27 @@ def test_release_rules(rig):
     assert hub.devices[D1].servo_moves == 1
 
 
+def test_release_again_while_the_ball_stays(rig):
+    """0.4: after RELEASE_DONE the ball is still on the switch: a second RELEASE_BALL is
+    accepted (the PC decides to try again); once it left, a release is refused as before."""
+    hub, gw, col = rig
+    game_ready(gw)
+    hub.devices[D1].stuck_releases = 1
+    hub.ball(D1)
+    col.wait("BALL_RECEIVED")
+    assert gw.release_ball(D1).ok
+    col.wait("RELEASE_DONE")
+    st = hub.devices[D1].status()
+    assert st["dial_state"] == "COMPLETE" and st["switch_on"]
+    assert gw.release_ball(D1).ok  # still there: once more
+    deadline = time.time() + 5
+    while hub.devices[D1].busy and time.time() < deadline:
+        time.sleep(0.02)
+    st = hub.devices[D1].status()
+    assert st["dial_state"] == "COMPLETE" and not st["switch_on"] and hub.devices[D1].servo_moves == 2
+    assert gw.release_ball(D1).result == "REJECTED_STATE"  # it left: a new cycle is needed
+
+
 def test_ack_loss_recovered_without_double_execution(rig):
     hub, gw, col = rig
     game_ready(gw)

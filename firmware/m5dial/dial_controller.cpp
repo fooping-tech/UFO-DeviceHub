@@ -214,7 +214,11 @@ CommandOutcome DialController::onCommand(CommandCode code, const uint8_t* params
         o.result = AckResult::Busy;
         return o;
       }
-      if (op_mode_ != OperationMode::Game || state_ != DialState::BallDetected || !link_up_) {
+      // A release is for a ball this Dial holds: one just detected, or (0.4) one that is
+      // still on the switch after a finished release (it did not leave: the PC may try
+      // again, with a new command_id). Never with an empty Dial.
+      if (op_mode_ != OperationMode::Game || !link_up_ ||
+          !(state_ == DialState::BallDetected || (state_ == DialState::Complete && receiver_.stableOn()))) {
         o.result = AckResult::RejectedState;
         return o;
       }

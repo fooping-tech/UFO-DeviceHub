@@ -280,6 +280,10 @@ class MockDial(MockDevice):
         self.releases = 0
         self.servo_moves = 0
         self.aborted = False
+        # the next `stuck_releases` releases do not get the ball out: the switch stays ON
+        # after RELEASE_DONE (tests of the PC's second release, firmware 0.4)
+        self.stuck_releases = 0
+        self.switch_on = False
         # Game mode LEDs: one PC effect slot per output, like the firmware
         self.slots: dict[str, dict | None] = {"FRONT": None, "TRANSFER": None}
         self.color = tuple(hub.cfg.dial_colors.get(int(dev_id), (0, 255, 255)))
@@ -401,7 +405,9 @@ class MockDial(MockDevice):
         if name == "RELEASE_BALL":
             if self.busy:
                 return "BUSY", False
-            if self.op_mode != "GAME" or self.dial_state != "BALL_DETECTED":
+            # a ball this Dial holds: just detected, or still on the switch after a release (0.4)
+            held = self.dial_state == "BALL_DETECTED" or (self.dial_state == "COMPLETE" and self.switch_on)
+            if self.op_mode != "GAME" or not held:
                 return "REJECTED_STATE", False
             now = _ms()
             self.release_at = now
@@ -417,6 +423,7 @@ class MockDial(MockDevice):
         if self.dial_state != "ARMED" or not self.online:
             return False
         self.dial_state = "BALL_DETECTED"
+        self.switch_on = True
         self.detected_at = _ms()
         self.clear_effects()  # the local receive animation starts at once
         self.emit("BALL_RECEIVED", cycle=self.cycle)
@@ -444,6 +451,8 @@ class MockDial(MockDevice):
                 self._idle()
             else:
                 self.emit("RELEASE_DONE", command_id=self.release_cmd, elapsed_ms=now - self.release_started)
+                self.switch_on = self.stuck_releases > 0  # did the ball leave?
+                self.stuck_releases = max(self.stuck_releases - 1, 0)
                 if self.op_mode == "GAME":
                     self.dial_state = "COMPLETE"
                 else:
@@ -456,7 +465,7 @@ class MockDial(MockDevice):
         s = super().status()
         now = _ms()
         ring, strip = self._slot("FRONT", now), self._slot("TRANSFER", now)
-        s.update(dial_state=self.dial_state, cycle=self.cycle, releases=self.releases,
+        s.update(dial_state=self.dial_state, cycle=self.cycle, releases=self.releases, switch_on=self.switch_on,
                  last_release_command=self.release_cmd,
                  front_effect=ring["effect"] if ring else "NONE",
                  transfer_effect=strip["effect"] if strip else "NONE",

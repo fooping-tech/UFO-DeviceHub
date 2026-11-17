@@ -3,6 +3,7 @@
 //   DISABLED --SET_MODE GAME--> READY --ARM_RECEIVER--> ARMED
 //   ARMED --switch OFF->ON--> BALL_DETECTED (BALL_RECEIVED event, once per cycle)
 //   BALL_DETECTED --RELEASE_BALL--> RELEASING --hold--> RETURNING --settle--> COMPLETE
+//   COMPLETE --RELEASE_BALL while the switch is still ON (the ball did not leave)--> RELEASING
 //   COMPLETE --ARM_RECEIVER--> ARMED ...
 //   SET_MODE STANDBY / STOP_ALL / session change --> DISABLED (after any running
 //   servo sequence has returned to standby)

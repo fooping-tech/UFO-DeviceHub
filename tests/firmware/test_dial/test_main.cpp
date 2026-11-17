@@ -179,10 +179,40 @@ void test_release_sequence() {
   TEST_ASSERT_EQUAL(1, r.em.count(EventCode::ReleaseDone));
   TEST_ASSERT_EQUAL(900, r.em.events.back().command_id);
   TEST_ASSERT_EQUAL(1, r.servo.count(0));
-  // next cycle needs ARM_RECEIVER
+  // the ball left (switch OFF): the next cycle needs ARM_RECEIVER
+  r.sw = false;
+  r.run(50);
   TEST_ASSERT_EQUAL(AckResult::RejectedState, r.cmd(CommandCode::ReleaseBall, 902).result);
   TEST_ASSERT_EQUAL(AckResult::Accepted, r.cmd(CommandCode::ArmReceiver).result);
   TEST_ASSERT_EQUAL(2, r.app.cycle());
+}
+
+void test_release_again_while_the_ball_stays() {
+  // 0.4: the release finished but the ball is still on the switch: a second RELEASE_BALL
+  // (a new command id) runs the servo again. With the switch OFF it is refused as before.
+  Rig r;
+  r.game();
+  r.dropBall();
+  r.servo.writes.clear();
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.cmd(CommandCode::ReleaseBall, 910).result);
+  r.run(2200);
+  TEST_ASSERT_EQUAL(DialState::Complete, r.app.dialState());
+  TEST_ASSERT_EQUAL(1, r.em.count(EventCode::ReleaseDone));
+  // still there
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.cmd(CommandCode::ReleaseBall, 911).result);
+  TEST_ASSERT_EQUAL(DialState::Releasing, r.app.dialState());
+  TEST_ASSERT_EQUAL(2, r.em.count(EventCode::ReleaseStarted));
+  r.run(2200);
+  TEST_ASSERT_EQUAL(DialState::Complete, r.app.dialState());
+  TEST_ASSERT_EQUAL(2, r.em.count(EventCode::ReleaseDone));
+  TEST_ASSERT_EQUAL(911, r.em.events.back().command_id);
+  TEST_ASSERT_EQUAL(2, r.servo.count(0));
+  TEST_ASSERT_EQUAL(1, r.em.count(EventCode::BallReceived));  // the same ball: no new event
+  // now it left
+  r.sw = false;
+  r.run(50);
+  TEST_ASSERT_EQUAL(AckResult::RejectedState, r.cmd(CommandCode::ReleaseBall, 912).result);
+  TEST_ASSERT_EQUAL(2, r.servo.count(0));
 }
 
 void test_double_release_same_command_id_via_node_core() {
@@ -808,6 +838,7 @@ int main() {
   RUN_TEST(test_ignored_outside_game);
   RUN_TEST(test_arm_while_switch_held_requires_release_first);
   RUN_TEST(test_release_sequence);
+  RUN_TEST(test_release_again_while_the_ball_stays);
   RUN_TEST(test_double_release_same_command_id_via_node_core);
   RUN_TEST(test_link_loss_behaviour);
   RUN_TEST(test_link_loss_during_release_finishes_to_standby);
