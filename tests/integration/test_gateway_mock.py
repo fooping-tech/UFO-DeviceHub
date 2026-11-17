@@ -620,3 +620,51 @@ def test_game_mode_presets_and_trace(tmp_path):
     assert states == ["STARTED", "DONE"]
     assert next(r for r in recs if r["kind"] == "game")["capsule_id"] == "c-1"
     assert not [r for r in recs if r.get("command") == "GET_STATUS"]
+
+
+# ---- the screen game's power-ups (docs/game-mode-interface.md 6.3): existing commands only
+def test_multi_ball_front_effect_keeps_one_release(rig):
+    from pc import game_mode as gm
+    hub, gw, col = rig
+    game_ready(gw)
+    hub.ball(D1)
+    col.wait("BALL_RECEIVED")
+    dial = hub.devices[D1]
+    assert gm.play(gw, D1, "INTAKE").ok
+    assert wait_for(lambda: dial.led("FRONT")["source"] == "pc", 1.0)
+    # sent as BACKGROUND it would lose against the INTAKE that is still running
+    assert gw.set_dial_effect(D1, "COMET", "TO_DIAL", priority="BACKGROUND", target="FRONT").result == "IGNORED_PRIORITY"
+    assert gm.play(gw, D1, "MULTI_BALL").ok  # NORMAL: replaces it, on the FRONT strip only
+    front, transfer = dial.led("FRONT"), dial.led("TRANSFER")
+    assert (front["source"], front["effect"], front["direction"], front["color"]) == ("pc", "COMET", "TO_DIAL", (0, 255, 255))
+    assert (transfer["effect"], transfer["direction"]) == ("CHASE", "TO_SCREEN")  # still the intake
+    assert gw.get_status(D1)["dial_state"] == "BALL_DETECTED"  # three balls on the screen, one capsule here
+    # the last ball left the field: the return flow replaces it on both strips, then one release
+    assert gm.play(gw, D1, "RETURN_FLOW").ok
+    assert all(dial.led(t)["effect"] == "COMET" and dial.led(t)["source"] == "pc" for t in ("FRONT", "TRANSFER"))
+    assert gw.release_ball(D1).ok
+    col.wait("RELEASE_DONE")
+    assert len([e for e in col.events if e.name == "RELEASE_STARTED"]) == 1
+    assert len([e for e in col.events if e.name == "BALL_RECEIVED"]) == 1
+
+
+def test_multi_ball_effect_ends_with_stop_all(rig):
+    from pc import game_mode as gm
+    hub, gw, col = rig
+    game_ready(gw)
+    hub.ball(D1)
+    col.wait("BALL_RECEIVED")
+    dial = hub.devices[D1]
+    assert wait_for(lambda: gm.play(gw, D1, "MULTI_BALL").ok and dial.led("FRONT")["source"] == "pc", 1.0)
+    assert all(r.ok for r in gw.stop_all().values())
+    assert wait_for(lambda: dial.led("FRONT")["source"] != "pc", 1.0)
+
+
+def test_double_score_light_and_back(rig):
+    hub, gw, col = rig
+    assert gw.set_light_mode("GAME_PLAY", brightness=180, speed=128).ok
+    assert gw.set_light_mode("CUSTOM", brightness=190, speed=190, color=(255, 174, 32), transition_ms=250).ok
+    assert gw.get_status(ILL)["light_mode"] == "CUSTOM"
+    assert gw.trigger_effect("SCORE", duration_ms=300).ok  # the momentary effects still play over it
+    assert gw.set_light_mode("GAME_PLAY", brightness=220, speed=230, transition_ms=200).ok  # the last stretch
+    assert gw.get_status(ILL)["light_mode"] == "GAME_PLAY"
