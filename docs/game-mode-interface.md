@@ -232,7 +232,8 @@ ARM_RECEIVER（次サイクル）
 * **S2**: `RELEASE_BALL` はポータル演出の指定同期点で送る。ACK は受理であり、動作完了ではない。
 * **S3**: `RELEASE_STARTED` を「実機の排出中演出」の基準にする。サーボ開始から実際にボールが離れるまでの時間は機構依存なので、**実機で校正する**（未確認）。
 * **S4**: `RELEASE_DONE` は制御シーケンスの完了で、**ボールが実際に出たことは保証しない**（サーボ完了 ≠ 排出成功）。`RELEASE_FAILED` の reason は 1 ABORTED（STOP_ALL）、2 LINK_LOST、3 SERVO_NOT_CONFIGURED。
-* 次サイクルは、Game が STATUS（`dial_state` = COMPLETE、`switch_on` = false）を確認してから `ARM_RECEIVER` を送る。スイッチが ON のまま ARM した場合、Dial は一度 OFF になるまで検出を保留する。**自動で無条件に再排出しない**（`RELEASE_BALL` は BALL_DETECTED のときだけ受理、同じ `command_id` の再送ではサーボは動かない）。
+* 次サイクルは、Game が STATUS（`dial_state` = COMPLETE、`switch_on` = false）を確認してから `ARM_RECEIVER` を送る。スイッチが ON のまま ARM した場合、Dial は一度 OFF になるまで検出を保留する。**自動で無条件に再排出しない**（`RELEASE_BALL` は Dial がボールを持っているときだけ受理、同じ `command_id` の再送ではサーボは動かない）。
+* **再排出（fw 0.4〜）**: 排出シーケンスが終わって COMPLETE になっても**スイッチが ON のまま**（ボールが出ていない）なら、Game は新しい `command_id` の `RELEASE_BALL` をもう一度送れる。Dial は COMPLETE かつ `switch_on` = true のときだけ受理し、同じシーケンス（`RELEASE_STARTED` → `RELEASE_DONE`）をやり直す。`BALL_RECEIVED` は増えない（同じサイクルの同じボール）。スイッチが OFF なら今までどおり `REJECTED_STATE`。回数の上限は Game が決める（Dial は数えない）。fw 0.3 以前は COMPLETE での `RELEASE_BALL` を常に `REJECTED_STATE` にする。
 
 ## 7. フェイルセーフ
 
