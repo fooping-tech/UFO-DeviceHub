@@ -94,6 +94,7 @@ params 長が表と 1 Byte でも違えば `INVALID_PARAMS`。
 | 0x11 | RELEASE_STARTED | u32 command_id |
 | 0x12 | RELEASE_DONE | u32 command_id, u16 elapsed_ms |
 | 0x13 | RELEASE_FAILED | u32 command_id, u8 reason (1 ABORTED, 2 LINK_LOST, 3 SERVO_NOT_CONFIGURED) |
+| 0x14 | DIAL_REQUEST | u8 request (1 GAME_RESTART, 2 GAME_END)。Dial 本体のメニューで人が選んだ依頼（fw 0.5〜）。JSON の data は `request`（名前）と `code`（数値）。Dial は依頼を送るだけで、どうするかは Game が決める。[game-mode-interface.md](game-mode-interface.md) 2.7 |
 | 0x20 | RELAY_DONE | u8 relay_id, u16 on_ms, u8 reason (0 COMPLETED, 1 OFF_COMMAND, 2 SAFETY, 3 WATCHDOG, 4 LOCAL_BUTTON) |
 | 0x21 | MIST_DONE | u16 on_s（実際に ON だった秒数）, u8 reason（RELAY_DONE と同じ）。ローカル操作で動いたミストでは送らない |
 | 0x30 | ERROR | u8 ErrorCode, u8 detail |
@@ -274,6 +275,6 @@ gw.stop_all()
 * すべての命令は `CommandResult` を返す（`.ok`, `.result`, `.duplicate`, `.clamped`, `.attempts`）。`wait=False` で `Future`。
 * 未接続時は `GatewayNotConnected` を送出し **何も送らない**（動作命令を後から送ることはない）。
 * パラメータ不正は `ProtocolError`（送信前）。
-* イベント: `BALL_RECEIVED, RELEASE_STARTED, RELEASE_DONE, RELEASE_FAILED, RELAY_DONE, MIST_DONE, ERROR`（機器）と `DEVICE_ONLINE, DEVICE_OFFLINE, DEVICE_REBOOTED, SESSION_CLOSED, GATEWAY_CONNECTED, GATEWAY_DISCONNECTED, HUB_ERROR`（通信層）。
+* イベント: `BALL_RECEIVED, RELEASE_STARTED, RELEASE_DONE, RELEASE_FAILED, DIAL_REQUEST, RELAY_DONE, MIST_DONE, ERROR`（機器）と `DEVICE_ONLINE, DEVICE_OFFLINE, DEVICE_REBOOTED, SESSION_CLOSED, GATEWAY_CONNECTED, GATEWAY_DISCONNECTED, HUB_ERROR`（通信層）。
 * `event_queue()` / `asyncio_queue(loop)` でも受け取れる。
 * `DeviceGateway(trace=TraceLog(path).record)` で命令・ACK・イベントを JSON Lines に記録する（`pc/trace.py`）。名前付きのゲームモード演出は `pc/game_mode.py`。

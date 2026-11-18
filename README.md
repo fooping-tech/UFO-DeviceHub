@@ -115,9 +115,10 @@ ATOM Lite + Atomic PWM Base + Unit 2Relay。旧 `atom_led_mist` スケッチの�
 | SG90 サーボ | G13（PORT.A） | `RELEASE_BALL` で排出 → 待機位置へ。ゆっくり動かし、止まったらパルスを止める（電源が落ちる対策） |
 | NeoPixel リング | G1（PORT.B） | 状態に合わせた演出。サーボ動作中は暗くする |
 | 受取スイッチ | G2（PORT.B、LED の隣） | スイッチ ON = ボール投入（`BALL_RECEIVED`）。GND に落とす配線 |
+| ダイヤル | — | 回すと**メニュー**、押すと実行: Dial リセット / 電源オフ / 排出動作 / ゲームのリスタート / ゲームの終了（後ろ 2 つはゲームへの依頼 `DIAL_REQUEST`） |
 | 本体ボタン | — | 2 秒長押しで**設定モード**: サーボ・LED・スイッチのテスト |
 
-設定モードの使い方とサーボの電源対策（配線側の対策を含む）は [docs/hardware.md](docs/hardware.md#設定モードハードウェアテスト)。
+メニュー・設定モードの使い方とサーボの電源対策（配線側の対策を含む）は [docs/hardware.md](docs/hardware.md#設定モードハードウェアテスト)。
 
 （`pio` が PATH にない場合は `~/.platformio/penv/bin/pio`）
 

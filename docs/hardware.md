@@ -109,6 +109,7 @@ NeoGacha `src/M5Dial_Gacha` から確認した値をそのまま初期値にし�
 | 前面 LED | `DIAL_LED_PIN`, `DIAL_LED_COUNT`, `DIAL_LED_BRIGHTNESS` | 1, 26, 25 | NeoGacha `LED_PIN2=1`, `NUM_LEDS 26`, `setbrightness(25)` |
 | サーボ動作中の LED | `DIAL_LED_BRIGHTNESS_SERVO` | 6 | 電源対策。サーボが動いている間は LED を暗くする |
 | 設定モード | `DIAL_SETTINGS_HOLD_MS`, `DIAL_SETTINGS_TIMEOUT_S` | 2000, 300 | ボタン長押し時間 / 無操作で自動終了 |
+| メニュー | `DIAL_MENU_TIMEOUT_S` | 10 | 無操作でメニューを閉じるまでの秒数（0 = 閉じない） |
 | エンコーダ | `DIAL_ENCODER_COUNTS_PER_STEP` | 4 | 1 クリックで項目が 1 つ進まない場合に調整 |
 | 号機色 | `DIAL_UNIT_COLOR_1`, `DIAL_UNIT_COLOR_2` | `{0,255,255}`（シアン）, `{255,0,255}`（マゼンタ） | 初期提案色。PC の `SET_DIAL_COLOR` でセッション中だけ変更できる |
 | 受取時のローカル発光 | `DIAL_RX_FLASH_MS`, `DIAL_RX_CHASE_MS` | 150, 1500 | **未確認**（提案値）。白フラッシュ → 号機色が画面方向へ |
@@ -140,6 +141,24 @@ SG90 は動き始めと引っかかったときに最大 0.7 A ほど流れ、M5
 
 パルスを止めた状態では、ホーンはギアの摩擦だけで止まっている。待機位置でゲートが押し戻されてボールが漏れる場合は `DIAL_SERVO_DETACH_MS 0` にする（保持し続ける）。
 
+### メニュー（ダイヤルを回す）
+
+設定モード以外のとき、**ダイヤルを回す**とメニューが出る。回して項目を選び、**押す**と実行する。最初は `CLOSE` の位置で開くので、ダイヤルに触れただけで何かが実行されることはない。10 秒（`DIAL_MENU_TIMEOUT_S`）操作しないと閉じる。
+
+| 項目 | 動作 |
+|---|---|
+| `CLOSE` | メニューを閉じる |
+| `DIAL RESET` | この Dial を再起動する。サーボが動いている間は実行しない（`SERVO RUNNING`） |
+| `POWER OFF` | この Dial の電源を切る。**バッテリー駆動のときだけ本当に切れる。** USB / 5 V 給電では電源を切れないので、画面と LED を消してスリープに入る。復帰は背面のリセットボタンか、電源の入れ直し |
+| `RELEASE` | 排出シーケンス（排出角度 → 保持 → 待機位置）を 1 回動かす。ゲームの状態は変えず、PC へのイベントも送らない（詰まったカプセルを手で出すための操作） |
+| `GAME RESTART` | ゲームにリスタートを依頼する（`DIAL_REQUEST` イベント） |
+| `GAME END` | ゲームに終了を依頼する（`DIAL_REQUEST` イベント） |
+
+* 実行結果は画面に約 1.5 秒出て、メニューが閉じる（`SENT` = 送信した、`NO GAME` = Hub かセッションがなく送っていない、`RELEASING`、`SERVO RUNNING`）。
+* `GAME RESTART` / `GAME END` は**依頼を送るだけ**で、実際にどうするかはゲーム側が決める（[game-mode-interface.md](game-mode-interface.md) 2.7）。ゲームが `DIAL_REQUEST` に対応していなければ何も起きない。
+* メニューを開いていても受取スイッチ・PC からの命令・LED 演出は止まらない。
+* メニューを開いたまま 2 秒長押しすると設定モードに入る。`DIAL_RECEIVER_SIM_BUTTON 1`（ボタンが模擬スイッチ）のときはメニューは出ない。
+
 ### 設定モード（ハードウェアテスト）
 
 ゲームのサイクル中（`WAITING` / `GOT BALL` / 排出中）以外のとき、**本体ボタンを 2 秒長押し**すると設定モードに入る（画面が紺色）。
@@ -165,7 +184,23 @@ SG90 は動き始めと引っかかったときに最大 0.7 A ほど流れ、M5
 
 ### 表示
 
-`DIAL #n ID 0xNN` / Hub 接続（`HUB OK`, `NO HUB LINK`, `HUB / NO SESSION`）/ 状態（`STANDBY`, `READY`, `WAITING`=受取待ち, `GOT BALL`=受取済み, `RELEASE`=排出中, `RETURN`, `DONE`, `ERROR`, `SETTINGS`）/ モード・サイクル / スイッチ状態・`[SIM BTN]` / MAC 不一致・エラー・サンプル鍵警告 / 自 MAC。
+通常画面はドット絵のアニメーション（80 × 80 ドットを 3 倍に拡大、最大 20 コマ/秒）。丸い画面そのものを、実機と画面ゲームをつなぐ**ポータル**に見立てている。色は号機色（1 号機シアン、2 号機マゼンタ。`SET_DIAL_COLOR` に追従）。
+
+| 状態 | 画面 |
+|---|---|
+| `STANDBY` | 星空と淡いリング。セッションがない間は自 MAC を表示（セットアップ用） |
+| `READY` | リングがゆっくり明滅 |
+| `WAITING`（受取待ち） | 渦が回り、光の粒が中心へ吸い込まれる |
+| `GOT BALL`（受取済み） | 白フラッシュ → **カプセルが下（実機側）から渦を巻いてポータルへ吸い込まれる**（1.2 秒）→ 中心からリングが広がる → 中心が脈動 |
+| `RELEASE` / `RETURN`（排出中） | リングが広がる → **カプセルがポータルから出てきて大きくなり、下へ落ちて画面の外へ出る**（2 秒）→ 外向きの渦 |
+| `DONE` | リングが広がって消え、星がまたたく |
+| `ERROR` / Hub 通信断 | 赤（`NO HUB`、`RADIO ERR`、`ERROR n`） |
+
+文字: `DIAL n` / Hub 接続（`HUB OK`, `NO SESSION`, `NO HUB`, `RADIO ERR`）/ 状態 / `GAME <サイクル>` / 警告（`MAC MISMATCH`, `ERROR n`, `EXAMPLE KEYS`）/ スイッチ（`SW ON` / `SW OFF`、模擬ボタンのときは `SIM`）。カプセルのアニメーション中は文字を出さない。
+
+![Dial の画面](images/dial-screen.png)
+
+上から STANDBY / READY / WAITING / GOT BALL / RELEASE / DONE / 通信断（左から右へ時間が進む）。この画像は実機ではなく、同じ描画コード（`firmware/m5dial/dial_scene.cpp`）を PC で動かして作ったもの: `tests/tools/scene_preview/run.sh 出力先フォルダ`。絵を変えるときは、まずこれで確認できる。アニメーションの時間は `dial_scene.h` の `kScene*Ms`。メニューと設定モードは従来どおりの文字画面。
 
 ### LED（G1 の前面 LED と G15 の LED、ゲームモード）
 

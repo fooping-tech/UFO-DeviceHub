@@ -3,6 +3,8 @@
 
 #include "../support.h"
 #include "m5dial/dial_controller.h"
+#include "m5dial/dial_menu.h"
+#include "m5dial/dial_scene.h"
 
 using namespace ufo;
 using namespace testsupport;
@@ -389,6 +391,197 @@ void test_abort_ramps_back_from_current_angle() {
   TEST_ASSERT_TRUE(r.servo.writes.back() >= mid);  // no jump to standby
   TEST_ASSERT_EQUAL(Dispenser::Result::Aborted, r.run(2000));
   TEST_ASSERT_EQUAL(180, r.disp->angle());
+}
+
+// ---- menu on the device ------------------------------------------------------------
+void test_menu_opens_on_close_and_wraps() {
+  DialMenu m(10000);
+  TEST_ASSERT_FALSE(m.open());
+  TEST_ASSERT_EQUAL(MenuItem::Count, m.press(0));  // closed: a press runs nothing
+  m.turn(1, 100);
+  TEST_ASSERT_TRUE(m.open());
+  TEST_ASSERT_EQUAL(MenuItem::Reset, m.item());
+  m.turn(1, 110);
+  TEST_ASSERT_EQUAL(MenuItem::PowerOff, m.item());
+  m.turn(1, 120);
+  TEST_ASSERT_EQUAL(MenuItem::Release, m.item());
+  m.turn(1, 130);
+  TEST_ASSERT_EQUAL(MenuItem::GameRestart, m.item());
+  m.turn(1, 140);
+  TEST_ASSERT_EQUAL(MenuItem::GameEnd, m.item());
+  TEST_ASSERT_EQUAL(MenuItem::GameEnd, m.press(150));
+  TEST_ASSERT_TRUE(m.open());  // stays until the result was shown
+  m.turn(1, 160);
+  TEST_ASSERT_EQUAL(MenuItem::Close, m.item());  // wraps
+  TEST_ASSERT_EQUAL(MenuItem::Count, m.press(170));
+  TEST_ASSERT_FALSE(m.open());
+  m.turn(-1, 200);  // the other way round: the last item first
+  TEST_ASSERT_EQUAL(MenuItem::GameEnd, m.item());
+  m.turn(-7, 210);  // more than one round
+  TEST_ASSERT_EQUAL(MenuItem::GameRestart, m.item());
+}
+
+void test_menu_timeout_and_result() {
+  DialMenu m(10000);
+  m.turn(3, 1000);
+  m.tick(10999);
+  TEST_ASSERT_TRUE(m.open());
+  m.turn(1, 10999);  // input restarts the timeout
+  m.tick(20998);
+  TEST_ASSERT_TRUE(m.open());
+  m.tick(20999);
+  TEST_ASSERT_FALSE(m.open());
+
+  m.turn(4, 30000);
+  TEST_ASSERT_EQUAL(MenuItem::GameRestart, m.press(30010));
+  m.showResult("SENT", true, 30010, 1500);
+  TEST_ASSERT_EQUAL_STRING("SENT", m.result());
+  TEST_ASSERT_TRUE(m.resultOk());
+  m.turn(1, 30100);  // ignored while the result is shown
+  TEST_ASSERT_EQUAL(MenuItem::GameRestart, m.item());
+  TEST_ASSERT_EQUAL(MenuItem::Count, m.press(30200));  // no second run
+  m.tick(31509);
+  TEST_ASSERT_TRUE(m.open());
+  m.tick(31510);
+  TEST_ASSERT_FALSE(m.open());
+  TEST_ASSERT_NULL(m.result());
+  m.turn(1, 40000);  // opens on CLOSE again, not on the last item
+  TEST_ASSERT_EQUAL(MenuItem::Reset, m.item());
+}
+
+void test_menu_release_is_silent_and_keeps_the_game_state() {
+  Rig r;
+  TEST_ASSERT_TRUE(r.app.localRelease(r.now));  // STANDBY
+  TEST_ASSERT_FALSE(r.app.localRelease(r.now));  // already running
+  TEST_ASSERT_EQUAL(AckResult::Busy, r.cmd(CommandCode::ArmReceiver).result);
+  r.run(3000);
+  TEST_ASSERT_EQUAL(1, r.servo.count(0));
+  TEST_ASSERT_EQUAL(180, r.servo.writes.back());
+  TEST_ASSERT_EQUAL(DialState::Disabled, r.app.dialState());
+  TEST_ASSERT_EQUAL(0, r.em.events.size());
+
+  // with a ball held: the capsule goes out, the game still owns the cycle
+  r.game();
+  r.dropBall();
+  TEST_ASSERT_EQUAL(DialState::BallDetected, r.app.dialState());
+  const size_t before = r.em.events.size();
+  TEST_ASSERT_TRUE(r.app.localRelease(r.now));
+  TEST_ASSERT_EQUAL(AckResult::Busy, r.cmd(CommandCode::ReleaseBall, 9).result);
+  r.run(3000);
+  TEST_ASSERT_EQUAL(2, r.servo.count(0));
+  TEST_ASSERT_EQUAL(DialState::BallDetected, r.app.dialState());
+  TEST_ASSERT_EQUAL(before, r.em.events.size());  // no RELEASE_* events
+  TEST_ASSERT_EQUAL(AckResult::Accepted, r.cmd(CommandCode::ReleaseBall, 10).result);  // the PC's release still works
+  r.run(3000);
+  TEST_ASSERT_EQUAL(1, r.em.count(EventCode::ReleaseDone));
+
+  // STOP_ALL aborts a menu release like any other motion, without events
+  TEST_ASSERT_TRUE(r.app.localRelease(r.now));
+  r.run(200);
+  r.cmd(CommandCode::StopAll);
+  r.run(2000);
+  TEST_ASSERT_EQUAL(180, r.servo.writes.back());
+  TEST_ASSERT_EQUAL(0, r.em.count(EventCode::ReleaseFailed));
+  TEST_ASSERT_EQUAL(DialState::Disabled, r.app.dialState());
+
+  r.app.enterSettings(r.now);
+  TEST_ASSERT_FALSE(r.app.localRelease(r.now));  // the settings mode has its own servo test
+}
+
+void test_menu_game_request_event() {
+  Rig r;
+  TEST_ASSERT_TRUE(r.app.requestGame(DialRequest::GameRestart, r.now));
+  TEST_ASSERT_TRUE(r.app.requestGame(DialRequest::GameEnd, r.now));
+  TEST_ASSERT_EQUAL(2, r.em.count(EventCode::DialRequest));
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(DialRequest::GameRestart), r.em.events[0].reason);
+  TEST_ASSERT_EQUAL(static_cast<uint8_t>(DialRequest::GameEnd), r.em.events[1].reason);
+  TEST_ASSERT_EQUAL(DialState::Disabled, r.app.dialState());  // the dial itself changes nothing
+
+  r.em.accept = false;  // no session: nothing is queued, the menu shows the failure
+  TEST_ASSERT_FALSE(r.app.requestGame(DialRequest::GameEnd, r.now));
+  r.em.accept = true;
+  r.app.onHubLinkChanged(false, r.now);
+  TEST_ASSERT_FALSE(r.app.requestGame(DialRequest::GameEnd, r.now));
+  TEST_ASSERT_EQUAL(2, r.em.count(EventCode::DialRequest));
+}
+
+// ---- main screen (pixel art) ---------------------------------------------------------
+namespace {
+int litPixels(const DialScene& s, int x0, int y0, int x1, int y1) {
+  int n = 0;
+  for (int y = y0; y <= y1; ++y)
+    for (int x = x0; x <= x1; ++x)
+      if (s.pixel(x, y) != 0) ++n;
+  return n;
+}
+bool sameFrame(const DialScene& a, const DialScene& b) {
+  return memcmp(a.pixels(), b.pixels(), sizeof(uint16_t) * DialScene::kSize * DialScene::kSize) == 0;
+}
+}  // namespace
+
+void test_scene_intake_and_release_animation() {
+  DialScene s;
+  DisplayModel m;
+  m.link = m.session = true;
+  m.op = OperationMode::Game;
+  m.state = DialState::Armed;
+  s.render(m, 1000);
+  TEST_ASSERT_FALSE(s.animating());
+  TEST_ASSERT_EQUAL_HEX16(0, s.pixel(0, 0));  // outside the round screen: never drawn
+  TEST_ASSERT_TRUE(litPixels(s, 0, 0, 79, 79) > 500);
+  DialScene before = s;
+  s.render(m, 1100);
+  TEST_ASSERT_FALSE(sameFrame(before, s));  // the portal moves
+
+  m.state = DialState::BallDetected;  // capsule comes in from the bottom, ends in the centre
+  s.render(m, 2000);
+  TEST_ASSERT_TRUE(s.animating());
+  TEST_ASSERT_EQUAL_HEX16(0xFFFF, s.pixel(40, 40));  // white flash at once
+  s.render(m, 2000 + kSceneIntakeMs + kSceneBurstMs - 1);
+  TEST_ASSERT_TRUE(s.animating());
+  s.render(m, 2000 + kSceneIntakeMs + kSceneBurstMs);
+  TEST_ASSERT_FALSE(s.animating());  // the text is back
+
+  m.state = DialState::Releasing;
+  s.render(m, 10000);
+  TEST_ASSERT_TRUE(s.animating());
+  m.state = DialState::Returning;  // the servo phase changes: the animation goes on, not from the start
+  s.render(m, 10000 + kSceneEmergeMs + 300);
+  TEST_ASSERT_TRUE(s.animating());
+  // the capsule is below the centre now (white lower half), on its way out
+  TEST_ASSERT_TRUE(litPixels(s, 36, 42, 43, 60) > 60);
+  s.render(m, 10000 + kSceneDropMs);
+  TEST_ASSERT_FALSE(s.animating());
+
+  DialScene boot;  // first frame in an old state: no entry animation
+  m.state = DialState::BallDetected;
+  boot.render(m, 5);
+  TEST_ASSERT_FALSE(boot.animating());
+}
+
+void test_scene_every_state_renders_inside_the_round_screen() {
+  const DialState states[] = {DialState::Disabled, DialState::Ready,     DialState::Armed,    DialState::BallDetected,
+                              DialState::Releasing, DialState::Returning, DialState::Complete, DialState::Error};
+  for (int link = 0; link < 2; ++link)
+    for (DialState st : states) {
+      DialScene s;
+      DisplayModel m;
+      m.link = link != 0;
+      m.session = link != 0;
+      m.mac_mismatch = m.example_keys = true;
+      m.error = ErrorCode::ServoNotConfigured;
+      m.mac = "AA:BB:CC:DD:EE:FF";
+      m.cycle = 65535;
+      s.render(m, 0);
+      m.state = st;
+      for (uint32_t t = 0; t < 3000; t += 37) {
+        s.render(m, 100 + t);
+        TEST_ASSERT_EQUAL_HEX16(0, s.pixel(0, 0));
+        TEST_ASSERT_EQUAL_HEX16(0, s.pixel(79, 79));
+        TEST_ASSERT_EQUAL_HEX16(0, s.pixel(79, 0));
+      }
+      TEST_ASSERT_TRUE(litPixels(s, 0, 0, 79, 79) > 100);
+    }
 }
 
 // ---- settings mode ---------------------------------------------------------------
@@ -853,6 +1046,12 @@ int main() {
   RUN_TEST(test_settings_switch_counts_without_events);
   RUN_TEST(test_settings_rejects_pc_commands_but_stop_all_leaves);
   RUN_TEST(test_settings_servo_tests);
+  RUN_TEST(test_menu_opens_on_close_and_wraps);
+  RUN_TEST(test_menu_timeout_and_result);
+  RUN_TEST(test_menu_release_is_silent_and_keeps_the_game_state);
+  RUN_TEST(test_menu_game_request_event);
+  RUN_TEST(test_scene_intake_and_release_animation);
+  RUN_TEST(test_scene_every_state_renders_inside_the_round_screen);
   RUN_TEST(test_led_path_geometry);
   RUN_TEST(test_led_direction_of_flow);
   RUN_TEST(test_dial_effect_accepted_and_shown);

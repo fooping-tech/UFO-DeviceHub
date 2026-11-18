@@ -4,7 +4,10 @@
 // Hardware (NeoGacha): SG90 on G13 (PORT.A), NeoPixel ring on G1 (PORT.B),
 // ball switch on G2 (PORT.B, next to the LED). Switch ON = ball received.
 //
-// Device button:
+// Device dial + button:
+//   turn                         menu (dial_menu.h): turn = choose, press = run
+//     CLOSE / DIAL RESET / POWER OFF / RELEASE / GAME RESTART / GAME END
+//     closes after DIAL_MENU_TIMEOUT_S without input
 //   hold DIAL_SETTINGS_HOLD_MS   enter / leave the settings mode (hardware test)
 //   in settings: turn = choose, press = run
 //     SERVO TEST   release sequence (release -> hold -> standby)
@@ -29,6 +32,7 @@
 
 #include "device_ids.h"
 #include "dial_controller.h"
+#include "dial_menu.h"
 #include "display.h"
 #include "led_effects.h"
 #include "node_runtime.h"
@@ -56,6 +60,9 @@
 #endif
 #ifndef DIAL_SETTINGS_TIMEOUT_S
 #define DIAL_SETTINGS_TIMEOUT_S 300
+#endif
+#ifndef DIAL_MENU_TIMEOUT_S
+#define DIAL_MENU_TIMEOUT_S 10
 #endif
 #ifndef DIAL_RECEIVER_PULSE_STRETCH_MS
 #define DIAL_RECEIVER_PULSE_STRETCH_MS 80
@@ -214,6 +221,8 @@ struct SettingsUi {
   uint32_t last_input = 0;
 } g_set;
 
+DialMenu g_menu(DIAL_MENU_TIMEOUT_S * 1000UL);
+
 int32_t g_enc_last = 0;
 bool g_long_done = false;
 
@@ -268,7 +277,70 @@ void beep(uint16_t hz, uint32_t ms) {
   M5Dial.Speaker.tone(hz, ms);
 }
 
+// ---- menu (turn the dial outside the settings mode) ----
+// The LEDs go dark and the servo pulses stop before the dial restarts / powers off.
+void quietOutputs() {
+  g_sg90.release();
+  FastLED.clear(true);
+}
+
+void menuRun(MenuItem item, uint32_t now) {
+  const bool hub = g_runtime.core().hubLinkUp() && g_runtime.core().sessionValid();
+  switch (item) {
+    case MenuItem::Reset:
+    case MenuItem::PowerOff:
+      if (g_dispenser.busy()) {  // never stop in the middle of a servo motion
+        g_menu.showResult("SERVO RUNNING", false, now);
+        beep(1000, 200);
+        return;
+      }
+      Serial.printf("menu: %s\n", menuItemLabel(item));
+      Serial.flush();
+      quietOutputs();
+      if (item == MenuItem::Reset) {
+        g_display.message("RESTART", "dial reset");
+        delay(400);
+        ESP.restart();
+      } else {
+        // Battery: the power hold pin is released. USB / 5 V supply: the power cannot be
+        // cut, the dial sleeps until its reset button is pressed or it is plugged in again.
+        g_display.message("POWER OFF", "wake: reset button");
+        delay(1200);
+        M5Dial.Display.sleep();
+        M5Dial.Display.setBrightness(0);
+        M5Dial.Power.powerOff();
+      }
+      return;
+    case MenuItem::Release:
+      if (g_app.localRelease(now)) {
+        Serial.println("menu: release");
+        g_menu.showResult("RELEASING", true, now);
+      } else {
+        g_menu.showResult(g_dispenser.busy() ? "SERVO RUNNING" : "SERVO NOT SET", false, now);
+        beep(1000, 200);
+      }
+      return;
+    case MenuItem::GameRestart:
+    case MenuItem::GameEnd: {
+      const DialRequest req = item == MenuItem::GameRestart ? DialRequest::GameRestart : DialRequest::GameEnd;
+      if (g_app.requestGame(req, now)) {
+        Serial.printf("menu: DIAL_REQUEST %s sent\n", dialRequestName(static_cast<uint8_t>(req)));
+        g_menu.showResult("SENT", true, now);
+        beep(5000, 80);
+      } else {
+        Serial.printf("menu: DIAL_REQUEST %s not sent (%s)\n", dialRequestName(static_cast<uint8_t>(req)),
+                      hub ? "outbox full" : "no hub / session");
+        g_menu.showResult(hub ? "NOT SENT" : "NO GAME", false, now);
+        beep(1000, 200);
+      }
+      return;
+    }
+    default: return;
+  }
+}
+
 void enterSettings(uint32_t now) {
+  g_menu.close();
   if (!g_app.enterSettings(now)) {
     beep(1000, 300);  // a game cycle or a release is running
     return;
@@ -337,9 +409,13 @@ void pollInput(uint32_t now) {
     else
       enterSettings(now);
   }
-  if (b.wasReleased() && !g_long_done && g_app.inSettings()) {
-    g_set.last_input = now;
-    settingsPress(now);
+  if (b.wasReleased() && !g_long_done) {
+    if (g_app.inSettings()) {
+      g_set.last_input = now;
+      settingsPress(now);
+    } else if (g_menu.open()) {
+      menuRun(g_menu.press(now), now);
+    }
   }
 #endif
   int32_t pos = M5Dial.Encoder.read();
@@ -350,8 +426,16 @@ void pollInput(uint32_t now) {
     if (g_app.inSettings()) {
       g_set.last_input = now;
       settingsTurn(steps, now);
+    } else {
+#if !DIAL_RECEIVER_SIM_BUTTON  // the button is the ball switch there: nothing could be run
+      const MenuItem before = g_menu.item();
+      const bool was_open = g_menu.open();
+      g_menu.turn(steps, now);
+      if (!was_open || g_menu.item() != before) beep(6000, 15);
+#endif
     }
   }
+  g_menu.tick(now);
   if (g_app.inSettings()) {
     uint16_t c = g_app.settingsSwitchCount();
     if (c != g_set.last_count) {
@@ -516,7 +600,7 @@ void setup() {
     else
       Serial.println("not configured (front LED only)");
   }
-  Serial.printf("settings mode: hold the button %d ms\n", DIAL_SETTINGS_HOLD_MS);
+  Serial.printf("menu: turn the dial; settings mode: hold the button %d ms\n", DIAL_SETTINGS_HOLD_MS);
   Serial.printf("reset reason: %s\n", resetReasonText(esp_reset_reason()));
   M5Dial.Speaker.tone(6000, 100);
 }
@@ -526,7 +610,7 @@ void loop() {
   uint32_t now = millis();
   g_sg90.service(now, g_servo_ready_at);
   g_runtime.loop();               // radio -> NodeCore -> DialController commands
-  pollInput(now);                 // button / encoder (settings mode)
+  pollInput(now);                 // button / encoder (menu, settings mode)
   g_app.tick(readSwitch(), now);  // receiver edge + servo sequence (non-blocking)
   {
     static DialState prev = DialState::Disabled;
@@ -552,6 +636,14 @@ void loop() {
     s.switch_count = g_app.settingsSwitchCount();
     s.receiver_pin = DIAL_RECEIVER_PIN;
     g_display.updateSettings(s);
+  } else if (g_menu.open()) {
+    MenuModel mm;
+    mm.item = g_menu.item();
+    mm.result = g_menu.result();
+    mm.result_ok = g_menu.resultOk();
+    mm.link = g_runtime.core().hubLinkUp() && g_runtime.core().sessionValid();
+    mm.servo_busy = g_dispenser.busy();
+    g_display.updateMenu(mm);
   } else {
     DisplayModel m;
     m.device_id = UFO_DEVICE_ID;
@@ -567,7 +659,8 @@ void loop() {
     m.mac_mismatch = g_runtime.macMismatch();
     m.radio_ok = g_runtime.radioOk();
     m.error = static_cast<ErrorCode>(g_app.errorCode());
-    g_display.update(m);
+    g_app.unitColor(m.r, m.g, m.b);
+    g_display.update(m, now);
   }
   beepOnStateChange();
   logLedEffects();

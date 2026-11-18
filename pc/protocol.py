@@ -82,6 +82,7 @@ class EventCode(IntEnum):
     RELEASE_STARTED = 0x11
     RELEASE_DONE = 0x12
     RELEASE_FAILED = 0x13
+    DIAL_REQUEST = 0x14
     RELAY_DONE = 0x20
     MIST_DONE = 0x21
     DEVICE_ERROR = 0x30
@@ -223,6 +224,13 @@ class IlluminationState(IntEnum):
     RELAY_ACTIVE = 0x02
     MIST_ACTIVE = 0x03
     ERROR = 0x07
+
+
+class DialRequest(IntEnum):
+    """Chosen in the menu on the dial (event DIAL_REQUEST, data.request = the name)."""
+
+    GAME_RESTART = 0x01
+    GAME_END = 0x02
 
 
 class ReleaseFailReason(IntEnum):
@@ -568,6 +576,8 @@ def encode_event_payload(code: EventCode, **f: int) -> bytes:
         return struct.pack("<BIH", code, f.get("command_id", 0), f.get("elapsed_ms", 0))
     if code == EventCode.RELEASE_FAILED:
         return struct.pack("<BIB", code, f.get("command_id", 0), f.get("reason", 0))
+    if code == EventCode.DIAL_REQUEST:
+        return struct.pack("<BB", code, f.get("request", 0))
     if code == EventCode.RELAY_DONE:
         return struct.pack("<BBHB", code, f.get("relay_id", 0), f.get("on_ms", 0), f.get("reason", 0))
     if code == EventCode.MIST_DONE:

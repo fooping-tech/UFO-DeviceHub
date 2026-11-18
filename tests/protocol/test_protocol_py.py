@@ -131,6 +131,7 @@ def test_set_mist_and_new_light_modes():
     assert P.encode_command_payload("SET_MIST", {"pattern": "PUFF", "duration_s": 300}).hex() == "14032c01"
     assert P.normalize_command("SET_LIGHT_MODE", {"mode": "MAGIC_PUFF"})["mode"] == "MAGIC_PUFF"
     assert P.encode_event_payload(P.EventCode.MIST_DONE, on_s=95, reason=0).hex() == "215f0000"
+    assert P.encode_event_payload(P.EventCode.DIAL_REQUEST, request=P.DialRequest.GAME_END).hex() == "1402"
 
 
 def test_system_magic_and_hello():

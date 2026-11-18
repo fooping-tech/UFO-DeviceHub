@@ -22,8 +22,8 @@ void DialController::resetUnitColor() {
   color_[2] = cfg_.color_b;
 }
 
-void DialController::emit(EventData& e, uint32_t now) {
-  if (emitter_) emitter_->emit(e, now);
+uint32_t DialController::emit(EventData& e, uint32_t now) {
+  return emitter_ ? emitter_->emit(e, now) : 0;
 }
 
 void DialController::toIdleState() {
@@ -70,6 +70,21 @@ void DialController::settingsServoHome(uint32_t now) {
   if (state_ == DialState::Settings) dispenser_.endManual(now);
 }
 
+bool DialController::localRelease(uint32_t now) {
+  if (state_ == DialState::Settings || !dispenser_.config().configured) return false;
+  if (!dispenser_.start(0, now)) return false;  // busy
+  quiet_motion_ = true;  // a person at the device: no RELEASE_* events, the game state stays
+  return true;
+}
+
+bool DialController::requestGame(DialRequest r, uint32_t now) {
+  if (state_ == DialState::Settings || !link_up_) return false;
+  EventData e;
+  e.code = static_cast<uint8_t>(EventCode::DialRequest);
+  e.reason = static_cast<uint8_t>(r);
+  return emit(e, now) != 0;  // 0: no session / outbox full
+}
+
 void DialController::tick(bool raw_switch_on, uint32_t now) {
   bool edge = receiver_.update(raw_switch_on, now);
   if (state_ == DialState::Settings) {
@@ -91,10 +106,12 @@ void DialController::tick(bool raw_switch_on, uint32_t now) {
   }
 
   Dispenser::Result r = dispenser_.tick(now);
-  if (quiet_motion_) {  // a settings test motion still finishing after SETTINGS was left
+  if (quiet_motion_) {  // a menu release, or a settings test motion finishing after SETTINGS was left
     if (r != Dispenser::Result::None) {
       quiet_motion_ = false;
-      toIdleState();
+      // a game cycle (ARMED / BALL_DETECTED / COMPLETE) is not touched by a manual release;
+      // after STOP_ALL (standby) the dial goes back to DISABLED
+      if (op_mode_ != OperationMode::Game) toIdleState();
     }
     return;
   }

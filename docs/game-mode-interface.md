@@ -116,6 +116,41 @@ Dial の STATUS は 12 → 18 Byte（末尾に追加）。JSON では次の項�
 
 既存コマンド・イベント（`BALL_RECEIVED`, `RELEASE_STARTED`, `RELEASE_DONE`, `RELEASE_FAILED`, `SET_MODE`, `ARM_RECEIVER`, `RELEASE_BALL`, `STOP_ALL`）のバイト列・意味は変えていない。ファームウェアの版は `GET_DEVICES` の `fw` で確認できる（本変更 = `0.3`）。
 
+### 2.7 `DIAL_REQUEST` イベント (0x14)（Dial 本体のメニュー、fw 0.5〜）
+
+Dial のダイヤルを回すと本体にメニューが出る（操作は [hardware.md](hardware.md#メニューダイヤルを回す)）。このうち **GAME RESTART** と **GAME END** は、Dial から Game への依頼としてイベントで届く。
+
+```json
+{"type":"EVENT","source":33,"session_id":123,"event_id":7,"name":"DIAL_REQUEST","data":{"request":"GAME_RESTART","code":1}}
+```
+
+| `request` | `code` | 意味 |
+|---|---|---|
+| `GAME_RESTART` | 1 | ゲームを最初からやり直してほしい |
+| `GAME_END` | 2 | ゲームを終了してほしい |
+
+* **Dial は依頼を送るだけ**で、自分の状態（ARMED / BALL_DETECTED など）も LED も変えない。リスタート・終了の中身（`STOP_ALL`、`SET_MODE`、画面遷移、確認ダイアログの有無）は Game が決めて、通常のコマンドで Dial を動かす。
+* `source` で左右どちらの Dial から来たかが分かる。どちらの Dial からでも同じ意味として扱うことを推奨する。
+* ほかのイベントと同じく、Hub が ACK するまで同じ `event_id` で再送され、PC ライブラリは重複を 1 回にまとめる。**セッションがないときは送られない**（Dial の画面に `NO GAME` と出る）。Game が起動していない間に押された依頼が、あとから届くことはない。
+* 未知の `request`（将来の追加）は `"UNKNOWN"` + `code` で届く。Game は知らない値を無視すること。
+* メニューの残りの項目（DIAL RESET / POWER OFF / RELEASE）は Dial 本体だけで完結し、イベントは出ない。Game から見える変化:
+
+| 項目 | Game から見えること |
+|---|---|
+| DIAL RESET | `DEVICE_REBOOTED` が届く（再起動が速いと `DEVICE_OFFLINE` は出ない）。Dial は `DISABLED` に戻るので、`SET_MODE GAME` → `ARM_RECEIVER` からやり直す |
+| POWER OFF | 通信断の判定時間がたつと `DEVICE_OFFLINE`。電源を入れ直すと `DEVICE_REBOOTED` |
+| RELEASE | **イベントなし**（`RELEASE_*` は出ない）。Dial の状態も変わらない。動作中は `RELEASE_BALL` / `ARM_RECEIVER` が `BUSY` になる。カプセルを保持したまま（BALL_DETECTED）人が排出しても Game には伝わらないので、その後の `RELEASE_BALL` は空の排出動作になる |
+
+```python
+def on_event(ev):
+    if ev.name == "DIAL_REQUEST":
+        if ev.data["request"] == "GAME_RESTART": restart_game()
+        elif ev.data["request"] == "GAME_END": end_game()
+gw.subscribe(on_event)
+```
+
+Mock: `hub.dial_request(DeviceId.M5DIAL_2, "GAME_RESTART")`。**旧 Hub（fw 0.4 以前）はこのイベントを捨てる**ので、Hub と Dial を同じ版にすること。
+
 ## 3. LED の出力と向き
 
 NeoGacha の筐体をそのまま使う。LED は Dial 1 台につき 2 系統（NeoGacha `M5Dial_Gacha.ino` の `LED_PIN2 = 1` = frontLed、`LED_PIN1 = 15` = topLed）。

@@ -59,6 +59,7 @@ bool EspNowTransport::begin(uint8_t channel, const uint8_t pmk[16], size_t rx_qu
   if (esp_now_set_pmk(pmk) != ESP_OK) return false;
   esp_now_register_recv_cb(onRecv);
   esp_now_register_send_cb(onSent);
+  ready_ = true;
   return true;
 }
 
@@ -115,6 +116,7 @@ void EspNowTransport::handleTx(bool ok) {
 
 bool EspNowTransport::send(const uint8_t mac[6], const uint8_t* data, size_t len) {
   if (len == 0 || len > kMaxPacketSize) return false;
+  if (!ready_) return false;  // radio not started (config error): esp_now_send would crash
   esp_err_t r = esp_now_send(mac, data, len);
   if (r != ESP_OK) {
     stats_.tx_errors = stats_.tx_errors + 1;

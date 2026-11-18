@@ -58,6 +58,7 @@ class EspNowTransport {
  private:
   bool isPeer(const uint8_t* mac) const;
   void* queue_ = nullptr;
+  bool ready_ = false;  // begin() succeeded; send() is refused until then
   uint8_t channel_ = 1;
   uint8_t peers_[kMaxPeers][6] = {{0}};
   volatile size_t peer_count_ = 0;

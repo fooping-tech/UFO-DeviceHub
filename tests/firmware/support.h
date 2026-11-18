@@ -57,9 +57,11 @@ class FakeNodeTransport : public NodeTransport {
 class FakeEmitter : public EventEmitter {
  public:
   uint32_t emit(const EventData& e, uint32_t /*now*/) override {
+    if (!accept) return 0;  // like NodeCore without a session
     events.push_back(e);
     return ++next_id;
   }
+  bool accept = true;
   size_t count(EventCode c) const {
     size_t n = 0;
     for (const auto& e : events)

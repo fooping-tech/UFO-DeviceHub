@@ -429,6 +429,14 @@ class MockDial(MockDevice):
         self.emit("BALL_RECEIVED", cycle=self.cycle)
         return True
 
+    def request(self, request: str) -> bool:
+        """The menu on the dial: GAME RESTART / GAME END -> DIAL_REQUEST event (needs a session)."""
+        req = P.DialRequest[request]
+        if not self.online or not self.session:
+            return False
+        self.emit("DIAL_REQUEST", request=req.name, code=int(req))
+        return True
+
     def on_session_changed(self, s: int) -> None:
         super().on_session_changed(s)
         self.clear_effects()
@@ -560,6 +568,12 @@ class MockHub:
         with self._lock:
             dev = self.devices[int(device_id)]
             return isinstance(dev, MockDial) and dev.ball()
+
+    def dial_request(self, device_id: int, request: str) -> bool:
+        """A person chose GAME_RESTART / GAME_END in the menu on a dial."""
+        with self._lock:
+            dev = self.devices[int(device_id)]
+            return isinstance(dev, MockDial) and dev.request(request)
 
     def set_device_online(self, device_id: int, online: bool, *, reboot: bool = False) -> None:
         with self._lock:

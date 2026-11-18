@@ -9,6 +9,7 @@ import time
 import pytest
 
 from pc import DeviceGateway, DeviceId, GatewayNotConnected, ProtocolError
+from pc import protocol as P
 from pc.mock_hub import MockConfig, MockDial, MockHub
 
 D1, D2, ILL = DeviceId.M5DIAL_1, DeviceId.M5DIAL_2, DeviceId.ILLUMINATION
@@ -301,6 +302,23 @@ def test_subscriber_exception_does_not_break_dispatch(rig):
     game_ready(gw)
     hub.ball(D1)
     col.wait("BALL_RECEIVED")
+
+
+def test_dial_menu_request_event(rig):
+    """GAME RESTART / GAME END chosen in the menu on a dial arrive as DIAL_REQUEST events."""
+    hub, gw, col = rig
+    assert hub.dial_request(D2, "GAME_RESTART")
+    ev = col.wait("DIAL_REQUEST")[0]
+    assert ev.source == D2 and ev.data["request"] == "GAME_RESTART"
+    assert P.DialRequest[ev.data["request"]] == P.DialRequest.GAME_RESTART == ev.data["code"]
+    assert hub.dial_request(D1, "GAME_END")
+    ev = col.wait("DIAL_REQUEST", 2)[1]
+    assert ev.source == D1 and ev.data["request"] == "GAME_END"
+    assert not hub.dial_request(ILL, "GAME_END")  # only the dials have the menu
+    hub.set_device_online(D1, False)
+    assert not hub.dial_request(D1, "GAME_END")
+    with pytest.raises(KeyError):
+        hub.dial_request(D2, "GAME_PAUSE")
 
 
 def test_ball_ignored_outside_game(rig):

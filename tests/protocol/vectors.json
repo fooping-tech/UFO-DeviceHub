@@ -122,6 +122,18 @@
    "system_id": 1
   },
   {
+   "name": "event_dial_request",
+   "source": 33,
+   "destination": 1,
+   "message_type": 2,
+   "sequence": 21,
+   "session_id": 2712847316,
+   "command_id": 80,
+   "payload_hex": "1402",
+   "hex": "4655012101021500d4c3b2a150000000021402",
+   "system_id": 1
+  },
+  {
    "name": "event_relay_done",
    "source": 16,
    "destination": 1,
