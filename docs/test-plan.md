@@ -15,6 +15,8 @@ uv run --no-project --with pyserial --with pytest python -m pytest   # PC ライ
 | `tests/firmware/test_node_core` | 他システム（magic 違い）のフレームを拒否してリンク維持にも使わない、不正 MAC・ブロードキャスト・ID 偽装・他機宛ての拒否、不正フレーム、セッション必須、旧セッション拒否、重複 command_id、Heartbeat 応答とセッション追従、Hub 通信断、イベント再送 |
 | `tests/firmware/test_illumination` | ミスト（起動時 OFF、BREATH / PUFF の周期、置き換え、最大時間と `clamped`、`MIST_DONE`、通信断・セッション終了・STOP_ALL・OFF・ボタン長押しで停止、未設定ピン）、ローカル操作（シーン送り、長押しでミスト ON/OFF、PC セッション開始で終了、設定で無効化）、新しい照明モード、モード切替、演出の割込みと優先度、演出終了後の復帰、リレーの指定時間 ON、最大 ON 制限、再噴射禁止、BUSY、通信断・セッション終了・STOP_ALL で OFF、未設定ピン、同一 command_id の二重噴射防止 |
 | `tests/firmware/test_dial` | 起動時の安全状態、受取検出、チャタリング、ON 保持、ゲーム外の無視、ARM 時に ON だった場合、排出シーケンス（角度・時間）、排出中の重複命令、同一 command_id の二重排出防止、通信断（受取解除・排出中は待機位置へ）、STOP_ALL 中断、セッション変更、電源再投入後の再送で排出しない |
+| `tests/firmware/test_dial`（メニュー） | `CLOSE` の位置で開く・一周・逆回し、無操作で閉じる、結果表示中は回しても押しても動かない、メニューの排出（イベントなし・ゲームの状態を変えない・PC の `RELEASE_BALL` は BUSY・STOP_ALL で中断・設定モードでは不可）、`DIAL_REQUEST`（GAME_RESTART / GAME_END、セッションなし・通信断では送らない）。`test_system`: Dial の依頼が Hub の JSON（`request` 名 + `code`）として PC に届く |
+| `tests/firmware/test_dial`（画面） | ドット絵画面: 受取（白フラッシュ → 吸い込み → 文字に戻る）、排出（RELEASING から RETURNING に変わってもアニメーションが続く、カプセルが下へ出る）、起動直後は入場アニメーションなし、全状態 × 通信あり/なしで丸い画面の外に描かない。見た目は `tests/tools/scene_preview/run.sh` で画像にして確認 |
 | `tests/firmware/test_dial`（ゲームモード LED） | LED の並び（下から上・上から下の 2 列）と TO_SCREEN / TO_DIAL の流れる向き、`SET_DIAL_EFFECT` の受理・不正パラメータ・優先度・時間切れ、G15 の LED なし（`NOT_CONFIGURED` / BOTH は前面のみ）とあり、受取のローカル発光（白 → 号機色 TO_SCREEN → 待機）と PC 後着演出、フラッシュ中に届いた演出、排出演出と終端、**LED の有無で排出シーケンスが変わらない**、STOP_ALL・セッション変更・通信断・設定モード・設定エラーで停止、`SET_DIAL_COLOR`、再送で演出がやり直しにならない |
 | `tests/firmware/test_hub` | `SET_DIAL_EFFECT` / `SET_DIAL_COLOR` の JSON 検証と STATUS、HELLO の system_id 不一致で SYSTEM_MISMATCH、SET_MIST の検証と STATUS / MIST_DONE、JSON 不正・行長超過・バージョン違い・未知 type、HELLO、パラメータ検証、NO_SESSION / SESSION_MISMATCH / UNKNOWN_DEVICE、未登録 MAC / ID 偽装、GET_DEVICES / GET_DIAG、PC 無通信でセッション終了 |
 | `tests/firmware/test_system` | **左右同時受取・同時排出、左右逆方向同時（ACK 消失つき）、PC 消失・Dial 再起動で演出停止**、Hub + 3 子機（実コード）をメモリ上の無線で接続: 個別制御、リレー、ボール 1 サイクル、PC 未 ACK のイベント再送、ACK 消失からの回復（排出 1 回）、再送上限で TIMEOUT、子機電源断・復帰（再起動検出・セッション再同期）、PC USB 切断で安全化、再接続で旧命令を再送しない、他展示フレームの無視、STOP_ALL |
@@ -95,6 +97,24 @@ uv run --no-project --with pyserial --with pytest python -m pytest   # PC ライ
 | G12 | `DIAL_TRANSFER_LED_PIN -1` で書き込み `dialfx dial1 CHASE TO_DIAL - 0 NORMAL TRANSFER` | `NOT_CONFIGURED`。`BOTH` なら前面 LED だけ光る |
 | G13 | 確定した LED 数・向き・給電方法 | `config/hardware.h` と `hardware.md` に記録 |
 | G14 | Game（CoreXY_UFO_Game）と結合 | 画面ログの `capsule_id` と DeviceHub のトレース（`session_id, source_dial, cycle, command_id`）が突合できる |
+
+### 2.3c Dial 本体のメニュー（fw 0.5、**すべて未確認**）
+
+Hub と Dial を同じ版（fw 0.5）に書き込んでから行う。
+
+| # | 手順 | 合格条件 |
+|---|---|---|
+| M1 | 通常画面でダイヤルを 1 クリック回す | `MENU` 画面が出て `DIAL RESET`（逆回しなら `GAME END`）を指す。1 クリックで 1 項目進む（進まなければ `DIAL_ENCODER_COUNTS_PER_STEP`） |
+| M2 | 何もせず 10 秒待つ / `CLOSE` で押す | 通常画面に戻る |
+| M3 | `RELEASE` で押す | 排出シーケンスが 1 回動く。PC の `events` に `RELEASE_*` が出ない。`BROWNOUT` で再起動しない |
+| M4 | PC を接続して `GAME RESTART` / `GAME END` で押す | 画面に `SENT`。PC に `DIAL_REQUEST`（`request` = GAME_RESTART / GAME_END、`source` が押した Dial）が 1 回ずつ届く |
+| M5 | PC を切断して M4 | 画面に `NO GAME`。再接続後に遅れて届かない |
+| M6 | `DIAL RESET` で押す | 再起動して `STANDBY`。PC に `DEVICE_REBOOTED`。サーボは待機位置 |
+| M7 | `POWER OFF` で押す（USB 給電 / バッテリー） | 画面・LED が消える。PC に `DEVICE_OFFLINE`。USB 給電ではリセットボタンで復帰、バッテリーでは電源が切れる。**どちらで確認したかを記録** |
+| M8 | 排出中に `DIAL RESET` / `POWER OFF` | `SERVO RUNNING` と出て実行されない |
+| M9 | ゲーム中（WAITING / GOT BALL）にメニューを開いて閉じる | 受取検出・排出・LED 演出に影響しない |
+| M11 | 通常画面を各状態で見る（`game` → カプセル投入 → `release`） | 色が号機色（シアン / マゼンタ。赤と青が入れ替わっていない）、吸い込み・排出のアニメーションがなめらか、文字が読める。**アニメーション中も受取検出・サーボの動き・LED が遅れない**（シリアルの `switch ON` とサーボのランプを確認） |
+| M10 | Game（CoreXY_UFO_Game）と結合 | `DIAL_REQUEST` でリスタート・終了が動く（Game 側の実装が必要） |
 
 ### 2.4 通信・他展示との共存
 

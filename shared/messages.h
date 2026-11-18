@@ -39,6 +39,7 @@ enum class EventCode : uint8_t {
   ReleaseStarted = 0x11,  // u32 command_id
   ReleaseDone = 0x12,     // u32 command_id, u16 elapsed_ms
   ReleaseFailed = 0x13,   // u32 command_id, u8 ReleaseFailReason
+  DialRequest = 0x14,     // u8 DialRequest: chosen in the menu on the dial (fw 0.5+)
   RelayDone = 0x20,       // u8 relay_id, u16 on_ms, u8 RelayEndReason
   MistDone = 0x21,        // u16 on_s, u8 RelayEndReason
   DeviceError = 0x30,     // u8 ErrorCode, u8 detail
@@ -178,6 +179,13 @@ enum class IlluminationState : uint8_t {
   Error = 0x07,
 };
 
+// What a person asked for in the menu on the dial (EventCode::DialRequest). The
+// dial only reports it; the game decides what happens.
+enum class DialRequest : uint8_t {
+  GameRestart = 0x01,
+  GameEnd = 0x02,
+};
+
 enum class ReleaseFailReason : uint8_t {
   Aborted = 0x01,         // STOP_ALL during the sequence
   LinkLost = 0x02,        // configured to abort on link loss
@@ -220,6 +228,7 @@ inline uint8_t u8(NodeFlag f) { return static_cast<uint8_t>(f); }
 
 const char* commandName(uint8_t code);
 const char* eventName(uint8_t code);
+const char* dialRequestName(uint8_t request);  // nullptr = unknown
 const char* ackResultName(uint8_t code);
 
 // Commands that change the physical world require an established session.
@@ -302,7 +311,7 @@ struct EventData {
   uint32_t command_id = 0;   // Release*
   uint16_t elapsed_ms = 0;   // ReleaseDone / RelayDone(on_ms)
   uint16_t on_s = 0;         // MistDone
-  uint8_t reason = 0;        // ReleaseFailed / RelayDone / MistDone / DeviceError(code)
+  uint8_t reason = 0;        // ReleaseFailed / RelayDone / MistDone / DeviceError(code) / DialRequest(request)
   uint8_t relay_id = 0;      // RelayDone
   uint8_t detail = 0;        // DeviceError
 };

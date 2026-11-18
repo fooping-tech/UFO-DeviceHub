@@ -12,6 +12,11 @@
 // nothing is running): servo / LED / switch tests. No events are sent, every
 // PC command except STOP_ALL is RejectedState; STOP_ALL leaves SETTINGS.
 //
+// Menu on the device (dial_menu.h; turn the dial outside SETTINGS):
+//   localRelease()  the release sequence as a manual action: no events, the game
+//                   state (ARMED / BALL_DETECTED / ...) stays as it is
+//   requestGame()   DIAL_REQUEST event (GAME_RESTART / GAME_END): the game decides
+//
 // LED (game mode, docs/game-mode-interface.md): the PC can run an effect on the
 // front LED (G1) and / or the second LED (G15) with SET_DIAL_EFFECT. Display order:
 //   1. SETTINGS, hub link lost, ERROR            (the PC effect is dropped)
@@ -76,6 +81,10 @@ class DialController : public NodeApp {
   uint16_t settingsSwitchCount() const { return settings_switch_count_; }
   void resetSettingsSwitchCount() { settings_switch_count_ = 0; }
 
+  // Menu (device dial + button, outside SETTINGS)
+  bool localRelease(uint32_t now);                 // false: servo busy / not configured / SETTINGS
+  bool requestGame(DialRequest r, uint32_t now);   // false: no hub link or no session (nothing sent)
+
   // LEDs: what the given output (DialLedTarget::Front / Transfer) shows at `now`.
   LedPlan ledPlan(DialLedTarget target, uint32_t now) const;
   const DialLedSlot& ledSlot(DialLedTarget target) const {
@@ -95,7 +104,7 @@ class DialController : public NodeApp {
 
  private:
   void toIdleState();
-  void emit(EventData& e, uint32_t now);
+  uint32_t emit(EventData& e, uint32_t now);
   void clearEffects();
   void resetUnitColor();
   CommandOutcome setDialEffect(const uint8_t* params, size_t len, uint32_t command_id, uint32_t now);
@@ -113,7 +122,7 @@ class DialController : public NodeApp {
   bool wait_clear_ = false;  // armed while the switch was already ON
   bool link_up_ = false;
   uint16_t settings_switch_count_ = 0;
-  bool quiet_motion_ = false;  // the running servo motion is a settings test: no events
+  bool quiet_motion_ = false;  // the running servo motion is a settings test / menu release: no events
   DialLedSlot slots_[2];       // PC effects: [0] front LED (G1), [1] second LED (G15)
   uint8_t color_[3] = {0, 255, 255};
   uint32_t detected_at_ = 0;   // BALL_DETECTED since (local receive animation)

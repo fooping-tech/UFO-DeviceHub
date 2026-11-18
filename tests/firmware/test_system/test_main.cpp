@@ -96,6 +96,25 @@ void test_ball_cycle_events_and_release() {
   TEST_ASSERT_EQUAL(0, w.dial2.servo.count(0));
 }
 
+void test_dial_menu_request_reaches_the_pc() {
+  World w;
+  ready(w);
+  TEST_ASSERT_TRUE(w.dial2.app.requestGame(DialRequest::GameRestart, w.now));
+  w.runAlive(100);
+  auto got = w.events("DIAL_REQUEST");
+  TEST_ASSERT_EQUAL(1, got.size());
+  TEST_ASSERT_EQUAL(D2, got[0]["source"].as<int>());
+  TEST_ASSERT_EQUAL_STRING("GAME_RESTART", got[0]["data"]["request"]);
+  TEST_ASSERT_EQUAL(1, got[0]["data"]["code"].as<int>());
+  w.ackEvent(got[0]);
+  TEST_ASSERT_TRUE(w.dial1.app.requestGame(DialRequest::GameEnd, w.now));
+  w.runAlive(100);
+  got = w.events("DIAL_REQUEST");
+  TEST_ASSERT_EQUAL(2, got.size());
+  TEST_ASSERT_EQUAL_STRING("GAME_END", got[1]["data"]["request"]);
+  TEST_ASSERT_EQUAL(D1, got[1]["source"].as<int>());
+}
+
 void test_unacked_pc_event_is_resent_with_same_id() {
   World w;
   ready(w);
@@ -354,6 +373,7 @@ int main() {
   RUN_TEST(test_individual_control_of_three_devices);
   RUN_TEST(test_steam_relay_pulse_and_done_event);
   RUN_TEST(test_ball_cycle_events_and_release);
+  RUN_TEST(test_dial_menu_request_reaches_the_pc);
   RUN_TEST(test_unacked_pc_event_is_resent_with_same_id);
   RUN_TEST(test_ack_loss_is_recovered_without_double_dispense);
   RUN_TEST(test_retry_limit_reports_timeout);

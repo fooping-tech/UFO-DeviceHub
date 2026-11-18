@@ -89,6 +89,9 @@
 #define DIAL_SETTINGS_HOLD_MS 2000
 #define DIAL_SETTINGS_TIMEOUT_S 300    // back to normal after this long without input
 #define DIAL_ENCODER_COUNTS_PER_STEP 4 // encoder counts per detent
+// Menu: turn the dial (outside the settings mode), press to run the shown item:
+// CLOSE / DIAL RESET / POWER OFF / RELEASE / GAME RESTART / GAME END.
+#define DIAL_MENU_TIMEOUT_S 10         // the menu closes after this long without input (0 = never)
 
 // NeoGacha front LED (NeoPixel ring on PORT.B G1, 26 pixels in NEOPIXELLED.h).
 #define DIAL_LED_PIN 1

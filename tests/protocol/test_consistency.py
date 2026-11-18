@@ -34,6 +34,7 @@ MAPPING = {
     "DialLedTarget": P.DialLedTarget,
     "DialLedFlag": P.DialLedFlag,
     "IlluminationState": P.IlluminationState,
+    "DialRequest": P.DialRequest,
     "ReleaseFailReason": P.ReleaseFailReason,
     "RelayEndReason": P.RelayEndReason,
     "ErrorCode": P.ErrorCode,

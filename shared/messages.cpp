@@ -29,6 +29,7 @@ const char* eventName(uint8_t code) {
     case EventCode::ReleaseStarted: return "RELEASE_STARTED";
     case EventCode::ReleaseDone: return "RELEASE_DONE";
     case EventCode::ReleaseFailed: return "RELEASE_FAILED";
+    case EventCode::DialRequest: return "DIAL_REQUEST";
     case EventCode::RelayDone: return "RELAY_DONE";
     case EventCode::MistDone: return "MIST_DONE";
     case EventCode::DeviceError: return "ERROR";
@@ -265,6 +266,7 @@ size_t encodeEvent(const EventData& e, uint8_t* out, size_t cap) {
     case EventCode::ReleaseStarted: w.u32(e.command_id); break;
     case EventCode::ReleaseDone: w.u32(e.command_id).u16(e.elapsed_ms); break;
     case EventCode::ReleaseFailed: w.u32(e.command_id).u8(e.reason); break;
+    case EventCode::DialRequest: w.u8(e.reason); break;
     case EventCode::RelayDone: w.u8(e.relay_id).u16(e.elapsed_ms).u8(e.reason); break;
     case EventCode::MistDone: w.u16(e.on_s).u8(e.reason); break;
     case EventCode::DeviceError: w.u8(e.reason).u8(e.detail); break;
@@ -272,6 +274,14 @@ size_t encodeEvent(const EventData& e, uint8_t* out, size_t cap) {
   }
   return w.ok() ? w.size() : 0;
 }
+const char* dialRequestName(uint8_t request) {
+  switch (static_cast<DialRequest>(request)) {
+    case DialRequest::GameRestart: return "GAME_RESTART";
+    case DialRequest::GameEnd: return "GAME_END";
+  }
+  return nullptr;
+}
+
 bool decodeEvent(const uint8_t* in, size_t len, EventData& e) {
   Reader r(in, len);
   e = EventData();
@@ -287,6 +297,7 @@ bool decodeEvent(const uint8_t* in, size_t len, EventData& e) {
       e.command_id = r.u32();
       e.reason = r.u8();
       break;
+    case EventCode::DialRequest: e.reason = r.u8(); break;
     case EventCode::RelayDone:
       e.relay_id = r.u8();
       e.elapsed_ms = r.u16();

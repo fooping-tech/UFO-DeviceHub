@@ -532,6 +532,12 @@ void HubJsonBridge::eventToPc(const PcEvent& e) {
       data["command_id"] = e.data.command_id;
       data["reason"] = e.data.reason;
       break;
+    case EventCode::DialRequest: {
+      const char* req = dialRequestName(e.data.reason);
+      data["request"] = req ? req : "UNKNOWN";
+      data["code"] = e.data.reason;
+      break;
+    }
     case EventCode::RelayDone:
       data["relay_id"] = e.data.relay_id;
       data["on_ms"] = e.data.elapsed_ms;
