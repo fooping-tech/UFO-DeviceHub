@@ -55,6 +55,11 @@ ANIMATIONS: dict[str, Animation] = {
     "RETURN_FLOW": Animation("COMET", "TO_DIAL", 0),
     # RELEASE_STARTED: the capsule is leaving the real machine (ends at RELEASE_DONE / FAILED)
     "RELEASING": Animation("CHASE", "TO_DIAL", 0),
+    # the screen game's MULTI BALL power-up (one real capsule, three balls on the screen):
+    # the FRONT strip only, so the TRANSFER strip keeps its intake / release role. NORMAL so
+    # it may replace the INTAKE that is still running; RETURN_FLOW (BOTH) replaces it when
+    # the last ball left the field. The dial still holds exactly one capsule.
+    "MULTI_BALL": Animation("COMET", "TO_DIAL", 0, target="FRONT"),
     # RELEASE_FAILED / release timeout
     "FAULT": Animation("FLASH", duration_ms=1500, priority="HIGH", color=(255, 0, 0)),
 }

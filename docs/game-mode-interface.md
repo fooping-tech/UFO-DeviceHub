@@ -221,6 +221,7 @@ PC 演出を Dial が自分で終わらせる契機（優先度に関係なく�
 | （受取チェイス） | Dial ローカル | CHASE | TO_SCREEN | 1500 | - | 両方 | フラッシュの直後 |
 | `ATTRACT` | Game（任意） | BREATHE | - | 0 | BACKGROUND | BOTH | ARMED 中の呼び込み |
 | `INTAKE` | Game | CHASE | TO_SCREEN | 1500 | NORMAL | BOTH | `BALL_RECEIVED` 受信時。画面ポータルの吸引と同時 |
+| `MULTI_BALL` | Game（任意） | COMET | TO_DIAL | 0 | NORMAL | **FRONT** | 画面のボールが 3 個に分かれたとき（§6.3）。`RETURN_FLOW` が置き換えて終わる |
 | `RETURN_FLOW` | Game | COMET | TO_DIAL | 0 | NORMAL | BOTH | Game が `RETURNING` を始めたとき |
 | `RELEASING` | Game（任意） | CHASE | TO_DIAL | 0 | NORMAL | BOTH | `RELEASE_STARTED` 受信時。送らなければ `RETURN_FLOW` が続く |
 | （排出チェイス） | Dial ローカル | CHASE | TO_DIAL | 排出中 | - | 両方 | PC 演出がないときの RELEASING / RETURNING |
@@ -269,6 +270,28 @@ ARM_RECEIVER（次サイクル）
 * **S4**: `RELEASE_DONE` は制御シーケンスの完了で、**ボールが実際に出たことは保証しない**（サーボ完了 ≠ 排出成功）。`RELEASE_FAILED` の reason は 1 ABORTED（STOP_ALL）、2 LINK_LOST、3 SERVO_NOT_CONFIGURED。
 * 次サイクルは、Game が STATUS（`dial_state` = COMPLETE、`switch_on` = false）を確認してから `ARM_RECEIVER` を送る。スイッチが ON のまま ARM した場合、Dial は一度 OFF になるまで検出を保留する。**自動で無条件に再排出しない**（`RELEASE_BALL` は Dial がボールを持っているときだけ受理、同じ `command_id` の再送ではサーボは動かない）。
 * **再排出（fw 0.4〜）**: 排出シーケンスが終わって COMPLETE になっても**スイッチが ON のまま**（ボールが出ていない）なら、Game は新しい `command_id` の `RELEASE_BALL` をもう一度送れる。Dial は COMPLETE かつ `switch_on` = true のときだけ受理し、同じシーケンス（`RELEASE_STARTED` → `RELEASE_DONE`）をやり直す。`BALL_RECEIVED` は増えない（同じサイクルの同じボール）。スイッチが OFF なら今までどおり `REJECTED_STATE`。回数の上限は Game が決める（Dial は数えない）。fw 0.3 以前は COMPLETE での `RELEASE_BALL` を常に `REJECTED_STATE` にする。
+
+### 6.3 パワーアップ（Game の 150 秒ゲーム、CoreXY_UFO_Game #188）
+
+Game は画面の中のアイテムで 3 つの効果を出す。**プロトコルの追加はない**（既存のコマンドだけ、version 1 のまま、ファームウェアの変更なし）。機器から見えるのは次の 2 つだけ。
+
+| 効果 | 機器への命令 | 始まり | 終わり |
+|---|---|---|---|
+| MULTI BALL（実カプセル 1 個に対して画面のボールが 3 個） | その Dial へ `SET_DIAL_EFFECT`: `MULTI_BALL`（COMET / TO_DIAL / `duration_ms` 0 / NORMAL / **FRONT**） | 画面のボールが分かれたとき（その Dial は `BALL_DETECTED` でボールを持っている） | 最後のボールが盤面を出て Game が `RETURN_FLOW`（BOTH）を送ったとき。FAULT（HIGH）、`STOP_ALL`、セッション失効でも終わる |
+| DOUBLE SCORE（15 秒） | イルミへ `SET_LIGHT_MODE`: `CUSTOM`、`color` (255,174,32)、`speed` 190（呼吸）、`brightness` 190 | 取った瞬間 | Game が状態に合う基本モードを送り直す（`GAME_PLAY`。残り 30 秒以下なら速い虹 = `speed` 230、ラウンドが終わっていれば `RESULT`） |
+| SPEED UP（10 秒） | なし（クレーンの JOG の速さだけ。DeviceHub の機器は関わらない） | - | - |
+
+守ること:
+
+* **MULTI BALL でも実カプセルは 1 個、排出は 1 回。** `cycle` は 1 つ、`RELEASE_BALL` は最後のボールが盤面を出たあとの 1 回だけ（§6.2 と同じ。再排出の条件も同じ）。画面のボールの数を Dial は知らない。
+* `MULTI_BALL` は **FRONT だけ**に出す。TRANSFER（G15）は受取・排出の向きを示す役目のまま。G15 の LED がない機体でも同じ命令でよい。
+* 優先度は NORMAL。Game の `INTAKE`（NORMAL、1500 ms）がまだ出ている間でも置き換えられる。BACKGROUND で送ると `INTAKE` の間は `IGNORED_PRIORITY` になる。Dial のローカル表示（受取の白フラッシュ、状態表示）と HIGH の演出はいつもどおり勝つ。
+* `duration_ms` 0 なので、Game が `RETURN_FLOW` を送らずに終わる経路（FAULT、停止）では §7 の契機で消える。
+* イルミの基本モードは、Game が「今の状態が求めるモード」と「最後に送ったモード」が違うときだけ送る（効果が切れた、残り 30 秒になった、フェーズが変わった）。`ERROR` モードの優先、`TRIGGER_EFFECT` の優先順位、リレー・ミストの制御は変わらない。
+* どの命令も飾りで、失敗（`IGNORED_PRIORITY`、`NOT_CONFIGURED`、タイムアウト）しても Game の得点・物理・排出は止まらない。Game 側の設定 `game_mode.powerups.lights` を false にすると、この 2 つは送られない。
+* **実機未検証**: FRONT の COMET と TRANSFER の演出を同時に出したときの見え方、金色の呼吸の明るさ・電流、サーボ動作中の減光。
+
+Mock のテスト: `tests/integration/test_gateway_mock.py::test_multi_ball_front_effect_keeps_one_release` と `::test_double_score_light_and_back`。
 
 ## 7. フェイルセーフ
 
