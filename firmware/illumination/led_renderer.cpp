@@ -1,5 +1,7 @@
 #if defined(ARDUINO)
 
+#include <Arduino.h>  // delay(), ledc*: FastLED 3.10+ no longer pulls in Arduino.h
+
 #include "led_renderer.h"
 
 #include "led_effects.h"
