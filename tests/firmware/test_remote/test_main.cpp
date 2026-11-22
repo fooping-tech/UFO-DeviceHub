@@ -135,21 +135,79 @@ void test_pose_shown_then_open_then_closed() {
   TEST_ASSERT_EQUAL(n, t.inputs());
 }
 
-void test_backlog_skips_frames_never_queues() {
+void test_latest_input_wins_in_the_queue() {
   Rig t;
-  t.flat(true);
-  TEST_ASSERT_EQUAL(1, t.inputs());
-  t.em.backlog = 2;  // two events wait for the hub's ACK
-  for (int i = 0; i < 50; ++i) t.tilt(true, 30, 0);
-  TEST_ASSERT_EQUAL(1, t.inputs());
-  TEST_ASSERT_TRUE(t.app.framesSkipped() > 0);
-  t.flat(false);  // let go while backed up: the closing frame waits ...
-  TEST_ASSERT_EQUAL(1, t.inputs());
-  t.em.backlog = 0;  // ... and goes as soon as the link is clear
-  t.flat(false);
-  TEST_ASSERT_EQUAL(2, t.inputs());
+  t.em.hold = true;  // nothing is acknowledged: the link is stalled
+  for (int i = 0; i < 60; ++i) t.tilt(true, 30, 0);
+  TEST_ASSERT_TRUE(t.inputs() >= 5);  // frames keep coming ...
+  TEST_ASSERT_EQUAL(1, t.em.queued.size());  // ... but only the latest waits in the queue
+  TEST_ASSERT_TRUE(t.app.framesDropped() >= 4);
+  t.app.staffAction(StaffAction::Next, t.now);  // a staff action is never dropped
+  t.tilt(true, 30, 0, 100);
+  TEST_ASSERT_EQUAL(2, t.em.queued.size());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(EventCode::StaffAction), t.em.queued[0]);
+  t.flat(false);  // let go: the closing frame replaces the queued movement
+  TEST_ASSERT_EQUAL(2, t.em.queued.size());
   TEST_ASSERT_EQUAL_UINT8(0, t.last().buttons);
-  TEST_ASSERT_EQUAL_UINT16(2, t.last().frame);  // skipped frames take no number
+  t.em.backlog = 4;  // far behind other events: a frame waits instead of piling up
+  t.flat(true);
+  size_t n = t.inputs();
+  t.flat(true, 100);
+  TEST_ASSERT_EQUAL(n, t.inputs());
+  TEST_ASSERT_TRUE(t.app.framesSkipped() > 0);
+}
+
+void test_halt_drops_queued_input() {
+  Rig t;
+  t.em.hold = true;
+  t.flat(true);
+  t.app.staffAction(StaffAction::Skip, t.now);
+  TEST_ASSERT_EQUAL(2, t.em.queued.size());
+  t.app.onCommand(CommandCode::StopAll, nullptr, 0, 1, t.now);  // STOP_ALL: no input may arrive later
+  TEST_ASSERT_EQUAL(1, t.em.queued.size());
+  TEST_ASSERT_EQUAL_UINT8(static_cast<uint8_t>(EventCode::StaffAction), t.em.queued[0]);
+  t.flat(true);
+  t.app.onHubLinkChanged(false, t.now);
+  TEST_ASSERT_EQUAL(1, t.em.queued.size());
+}
+
+// Review on #14, with the real NodeCore: input frames never acknowledged, then STOP_ALL. No
+// movement frame is transmitted after it, however long the outbox keeps retrying.
+void test_nodecore_never_retransmits_input_after_stop_all() {
+  RemoteConfig cfg;
+  RemoteController app(cfg);
+  FakeNodeTransport tx;
+  NodeConfig nc;
+  nc.self_id = static_cast<uint8_t>(DeviceId::StaffRemote);
+  nc.device_type = DeviceType::StaffRemote;
+  memcpy(nc.hub_mac, hubMac(), 6);
+  nc.event_policy.retry_forever = true;
+  NodeCore core(nc, tx, app);
+  app.setEmitter(&core);
+  core.begin(0, 0x1111, 0x2222);
+  std::vector<uint8_t> f = simpleCommand(nc.self_id, 7, 0x80000001, CommandCode::SessionBegin);
+  core.onFrame(hubMac(), f.data(), f.size(), -40, 0);
+  core.tick(0);
+  uint32_t now = 0;
+  for (int i = 0; i < 50; ++i) {  // 500 ms of holding the key, the hub never ACKs
+    now += 10;
+    app.tick(true, -0.5f, 0.0f, 0.866f, now);
+    core.tick(now);
+  }
+  TEST_ASSERT_TRUE(core.pendingEvents() <= 1);  // only the latest frame waits
+  f = simpleCommand(nc.self_id, 7, 0x80000002, CommandCode::StopAll);
+  core.onFrame(hubMac(), f.data(), f.size(), -40, now);
+  TEST_ASSERT_EQUAL(0, core.pendingEvents());
+  tx.clear();
+  for (int i = 0; i < 300; ++i) {  // 3 s more of retries, the key still held (latched)
+    now += 10;
+    app.tick(true, -0.5f, 0.0f, 0.866f, now);
+    core.tick(now);
+  }
+  size_t inputs = 0;
+  for (const Packet& p : tx.packets(MsgType::Event))
+    if (p.payload[0] == static_cast<uint8_t>(EventCode::RemoteInput)) ++inputs;
+  TEST_ASSERT_EQUAL(0, inputs);
 }
 
 void test_stop_latches_move_until_released() {
@@ -239,7 +297,9 @@ int main(int, char**) {
   RUN_TEST(test_move_streams_relative_tilt_then_closes);
   RUN_TEST(test_z_mode_flag);
   RUN_TEST(test_pose_shown_then_open_then_closed);
-  RUN_TEST(test_backlog_skips_frames_never_queues);
+  RUN_TEST(test_latest_input_wins_in_the_queue);
+  RUN_TEST(test_halt_drops_queued_input);
+  RUN_TEST(test_nodecore_never_retransmits_input_after_stop_all);
   RUN_TEST(test_stop_latches_move_until_released);
   RUN_TEST(test_stop_all_session_and_link_halt);
   RUN_TEST(test_event_codec_roundtrip);

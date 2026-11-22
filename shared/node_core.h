@@ -57,6 +57,9 @@ class EventEmitter {
   // Events queued and not yet acknowledged by the hub (a device that streams input
   // skips a frame while the link is backed up, so no stale burst arrives later).
   virtual size_t pending() const { return 0; }
+  // Drops the queued, not yet acknowledged events of this code (a stream whose old values
+  // must never arrive late: only the latest state counts). Returns how many.
+  virtual size_t dropPending(EventCode /*code*/) { return 0; }
 };
 
 // Physical sending of a frame to the hub (ESP-NOW unicast on the device).
@@ -114,6 +117,7 @@ class NodeCore : public EventEmitter, private FrameSink {
   uint32_t emitEvent(const EventData& e, uint32_t now);
   uint32_t emit(const EventData& e, uint32_t now) override { return emitEvent(e, now); }
   size_t pending() const override { return outbox_.size(); }
+  size_t dropPending(EventCode code) override { return outbox_.purgeEvent(static_cast<uint8_t>(code)); }
 
   uint32_t session() const { return session_; }
   bool sessionValid() const { return session_ != 0; }

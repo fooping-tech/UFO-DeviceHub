@@ -153,6 +153,7 @@ const Item* g_flash = nullptr;  // the item just sent (a short white flash)
 uint32_t g_flash_until = 0;
 uint32_t g_last_input = 0;
 bool g_dim = false;
+bool g_wake_press = false;  // the yellow key's press woke the screen: it moves nothing until let go
 bool g_dirty = true;
 uint32_t g_last_draw = 0;
 
@@ -294,9 +295,15 @@ void pollInput(uint32_t now) {
     g_haptics.play(ui::kSoft, now);
   }
   if (M5.BtnA.wasPressed()) {  // the yellow key: つぎへ on the staff page, move on the play page
-    if (!wake(now) && g_page == Page::Staff && sendStaff(Act::Next, "つぎへ", now)) celebrate(kStaffRing[0], now);
-    if (g_page == Page::Play) g_haptics.play(ui::kTick, now);
+    if (wake(now)) {
+      g_wake_press = true;  // only woke the screen (review on #14): not a move, not a つぎへ
+    } else if (g_page == Page::Staff) {
+      if (sendStaff(Act::Next, "つぎへ", now)) celebrate(kStaffRing[0], now);
+    } else {
+      g_haptics.play(ui::kTick, now);
+    }
   }
+  if (!M5.BtnA.isPressed()) g_wake_press = false;
   if (M5.BtnA.isPressed()) g_last_input = now;
 
   auto t = M5.Touch.getDetail();
@@ -541,7 +548,7 @@ void loop() {
     ay = data.accel.y;
     az = data.accel.z;
   }
-  const bool move_key = g_page == Page::Play && M5.BtnA.isPressed() && !g_dim;
+  const bool move_key = g_page == Page::Play && M5.BtnA.isPressed() && !g_dim && !g_wake_press;
   g_app.tick(move_key, ax, ay, az, now);
 
   if (!g_dim && now - g_last_input > REMOTE_DIM_S * 1000UL && !g_app.streaming()) {

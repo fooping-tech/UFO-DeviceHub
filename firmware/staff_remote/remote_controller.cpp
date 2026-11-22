@@ -90,7 +90,9 @@ void RemoteController::tick(bool move_held, float ax, float ay, float az, uint32
 
 bool RemoteController::send(const RemoteFrame& f, uint32_t now) {
   if (!emitter_) return false;
-  if (emitter_->pending() >= 2) {  // the link is backed up: never queue stale input
+  // latest wins: an older frame still waiting for the hub's ACK is dropped, never sent late
+  dropped_ += emitter_->dropPending(EventCode::RemoteInput);
+  if (emitter_->pending() >= 4) {  // the link is backed up behind other events: wait
     ++skipped_;
     return false;
   }
@@ -122,6 +124,8 @@ void RemoteController::showPose(RemotePose p, uint32_t now) {
 }
 
 void RemoteController::halt() {
+  // the input frames still queued go too: none may arrive after a stop (review on #14)
+  if (emitter_) dropped_ += emitter_->dropPending(EventCode::RemoteInput);
   streaming_ = false;
   closing_ = false;
   pose_on_ = false;

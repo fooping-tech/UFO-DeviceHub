@@ -99,7 +99,7 @@ params 長が表と 1 Byte でも違えば `INVALID_PARAMS`。
 | 0x21 | MIST_DONE | u16 on_s（実際に ON だった秒数）, u8 reason（RELAY_DONE と同じ）。ローカル操作で動いたミストでは送らない |
 | 0x30 | ERROR | u8 ErrorCode, u8 detail |
 | 0x40 | STAFF_ACTION | u8 StaffAction (1 NEXT, 2 SKIP, 3 MENU, 4 RECOVER, 5 SWITCH, 6 STOP)。スタッフ用リモコン（M5StopWatch、0x30、fw 0.6〜）で押された、ゲームのスタッフ操作（CoreXY_UFO_Game `docs/staff_operations.md` の F6〜F10・Space）。JSON の data は `action`（名前）と `code`。リモコンは送るだけで、どうするかは Game が決める |
-| 0x41 | REMOTE_INPUT | u8 buttons (0x01 MOVE: 移動ボタンを押している, 0x02 AXIS_Z: 前後の傾きで上下), i8 x, i8 y（-100..100、右・奥が +）, u8 RemotePose (0 OPEN, 1 FIST, 2 PEACE, 3 POINT), u16 frame。JSON の data は `move, z, x, y, pose`（名前）, `frame`。押している間 100 ms ごと、離したら 1 回（何も押していない）、その後は送らない。Hub への ACK 待ちが 2 件以上あるときはその回を飛ばす（遅れた傾きをまとめて届けない）。Game は来なくなったら止める |
+| 0x41 | REMOTE_INPUT | u8 buttons (0x01 MOVE: 移動ボタンを押している, 0x02 AXIS_Z: 前後の傾きで上下), i8 x, i8 y（-100..100、右・奥が +）, u8 RemotePose (0 OPEN, 1 FIST, 2 PEACE, 3 POINT), u16 frame。JSON の data は `move, z, x, y, pose`（名前）, `frame`。押している間 100 ms ごと、離したら 1 回（何も押していない）、その後は送らない。最新だけが有効: 新しいフレームを入れる前に、Hub の ACK を待っている古い REMOTE_INPUT を送信待ちから消す。停止（STOP・STOP_ALL・セッションの変化・通信断）でも消す（古い傾きが遅れて届くことはない）。ほかのイベントが 4 件以上たまっているときはその回を飛ばす。Game は来なくなったら止める |
 
 #### ACK（6 Byte）
 

@@ -15,10 +15,12 @@
 // centre (like the pinch joystick's anchor). Nothing moves until it is pressed.
 //
 // Safety:
-//   - a frame is skipped (not queued) while two or more events wait for the hub's ACK,
-//     so a backed-up link never delivers a stale burst of tilt later;
+//   - latest wins: before a frame is queued, the older input frames still waiting for the
+//     hub's ACK are dropped from the outbox, so a stalled link never delivers old tilt later
+//     (behind other queued events a frame waits instead);
 //   - STOP (the staff action), STOP_ALL from the hub, a session change or the hub link
-//     lost end the stream and latch the move button: it must be let go and pressed again.
+//     lost end the stream, drop the queued input frames and latch the move button: it must
+//     be let go and pressed again.
 #pragma once
 
 #include <stdint.h>
@@ -70,6 +72,7 @@ class RemoteController : public NodeApp {
   RemotePose shownPose(uint32_t now) const;
   uint16_t framesSent() const { return frame_no_; }
   uint32_t framesSkipped() const { return skipped_; }
+  uint32_t framesDropped() const { return dropped_; }  // queued frames replaced / cancelled
 
   // Tilt (degrees from level, holder's axes) -> stick value (-100..100). Pure.
   static int8_t shape(float deg, float dead_deg, float full_deg);
@@ -106,6 +109,7 @@ class RemoteController : public NodeApp {
   bool sent_once_ = false;
   uint16_t frame_no_ = 0;
   uint32_t skipped_ = 0;
+  uint32_t dropped_ = 0;
 };
 
 }  // namespace ufo

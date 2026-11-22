@@ -66,6 +66,8 @@ class ReliableQueue {
   // Drops queued entries. dest = 0xFF: all destinations. Returns the number removed.
   size_t purge(uint8_t dest = 0xFF);
   size_t purgeSession(uint32_t keep_session);  // drop entries whose header session differs
+  // drop queued EVENT frames whose payload starts with `event_code` (not yet acknowledged)
+  size_t purgeEvent(uint8_t event_code);
   // Removes the oldest entry for dest (any dest if 0xFF) and copies it out.
   bool popFor(uint8_t dest, Entry& out);
   size_t size() const;
