@@ -251,10 +251,12 @@ SG90 は動き始めと引っかかったときに最大 0.7 A ほど流れ、M5
 | | 輪: ストップ | 0.25 秒 | STAFF_ACTION STOP |
 
 * 送れなかったとき（Hub や PC とつながっていない）は中央の下の行に赤で出て、長く振動する。
-* 60 秒（`REMOTE_DIM_S`）操作がないと画面を暗くする。暗いときの最初のタッチ・ボタンは画面を戻すだけで、何も送らない。
+* 60 秒（`REMOTE_DIM_S`）操作がないと**待機画面**（黒地に浮かぶ UFO と「タッチで もどる」、明るさ `REMOTE_STANDBY_BRIGHTNESS`）にする。待機中の最初のタッチ・ボタンは画面を戻すだけで、何も送らない。
+* 電源ボタンで電源を入れたとき（電源オフからの起動）は、起動直後に 1 回だけ自動で再起動する（約 1 秒）。電源オフからの起動では画面（AMOLED）が真っ黒のままになることがあり、電源が入ったままの再起動なら必ず映るため（2026-11-22 に実機で確認）。
 * ストップ、Hub の STOP_ALL、セッションの変化、Hub との通信断で入力の送信をやめ、送信待ちの入力を消し、黄ボタンを一度離すまで再開しない。
 * 暗い画面を黄ボタンで起こしたときは、そのボタンを離すまで移動も「つぎへ」も送らない。
-* 画面の確認: USB でつないで `uv run --no-project --with pyserial --with pillow python tests/tools/remote_screenshot.py <ポート> out.png`（シリアルの `S` で画面を送る。`P` は画面の切り替え、デバッグ用）。
+* 画面の確認: USB でつないで `uv run --no-project --with pyserial --with pillow python tests/tools/remote_screenshot.py <ポート> out.png`（シリアルの `S` で画面を送る）。ほかのデバッグ用コマンド: `P` 画面の切り替え、`D` すぐ待機画面へ、`?` 状態（待機中か、接続、電池、起動理由）、`Q` 電源チップ・I/O エキスパンダのレジスタ。押した入力・待機画面の出入り・起動理由もシリアルに出る。
+* 書き込み: `pio run -e staff_remote_s2 -t upload` が `No serial data received` で失敗するときは、esptool を直接 `--no-stub` で使う（`--before usb_reset`、アプリだけ `0x10000`）。シリアルポートを開くと時計は再起動する。
 
 ### 調整（`config/hardware.h`、なければ既定値）
 
@@ -263,7 +265,7 @@ SG90 は動き始めと引っかかったときに最大 0.7 A ほど流れ、M5
 | `REMOTE_TILT_DEAD_DEG` / `REMOTE_TILT_FULL_DEG` | 4 / 25 | 傾きの不感帯と、最高速になる傾き（度） |
 | `REMOTE_TILT_SWAP_XY` / `REMOTE_TILT_INVERT_X` / `REMOTE_TILT_INVERT_Y` | 1 / 0 / 1（StopWatch の IMU は画面に対して 90° 回り、前後が逆。2026-11-22 に実機で確認） | 傾きの軸の入れ替え・反転（画面の十字の点が、傾けた方向に動くように合わせる） |
 | `REMOTE_HOLD_MS` / `REMOTE_STOP_HOLD_MS` / `REMOTE_RECOVER_HOLD_MS` | 450 / 250 / 1200 | 長押しの時間（ふつう / ストップ / ふっき） |
-| `REMOTE_BRIGHTNESS` / `REMOTE_DIM_S` / `REMOTE_VIBRATION` | 160 / 60 / 160 | 画面の明るさ、暗くするまでの秒数、振動の強さ（0 = 振動しない） |
+| `REMOTE_BRIGHTNESS` / `REMOTE_STANDBY_BRIGHTNESS` / `REMOTE_DIM_S` / `REMOTE_VIBRATION` | 160 / 60 / 60 / 255 | 画面の明るさ、待機画面の明るさ、待機画面にするまでの秒数、振動（クリック）の強さ（0 = 振動しない） |
 
 ## 照明モード・演出（Illumination）
 

@@ -59,6 +59,9 @@
 #ifndef REMOTE_BRIGHTNESS
 #define REMOTE_BRIGHTNESS 160
 #endif
+#ifndef REMOTE_STANDBY_BRIGHTNESS
+#define REMOTE_STANDBY_BRIGHTNESS 60  // the standby screen: dark, but clearly not "off"
+#endif
 #ifndef REMOTE_VIBRATION
 #define REMOTE_VIBRATION 255  // strength of the clicks, 0 = no vibration
 #endif
@@ -278,6 +281,7 @@ bool wake(uint32_t now) {  // true = this input only woke the screen
   if (!g_dim) return false;
   g_dim = false;
   M5.Display.setBrightness(REMOTE_BRIGHTNESS);
+  Serial.printf("[%lu] screen: awake\n", static_cast<unsigned long>(now));
   g_dirty = true;
   return true;
 }
@@ -290,6 +294,14 @@ void showPage(Page p, uint32_t now) {
 }
 
 void pollInput(uint32_t now) {
+  {  // diagnostics: every raw input, dimmed or not
+    auto td = M5.Touch.getDetail();
+    if (M5.BtnA.wasPressed()) Serial.printf("[%lu] input: yellow (dim %d)\n", static_cast<unsigned long>(now), g_dim);
+    if (M5.BtnB.wasPressed()) Serial.printf("[%lu] input: blue (dim %d)\n", static_cast<unsigned long>(now), g_dim);
+    if (M5.BtnPWR.wasPressed()) Serial.printf("[%lu] input: power (dim %d)\n", static_cast<unsigned long>(now), g_dim);
+    if (td.wasPressed())
+      Serial.printf("[%lu] input: touch %d,%d (dim %d)\n", static_cast<unsigned long>(now), td.x, td.y, g_dim);
+  }
   if (M5.BtnB.wasPressed() && !wake(now)) {  // the blue key: the other page
     showPage(g_page == Page::Staff ? Page::Play : Page::Staff, now);
     g_haptics.play(ui::kSoft, now);
@@ -463,10 +475,35 @@ void drawStick(LovyanGFX& d, uint32_t now) {
   ui::drawUfo(d, CX + dx, CY + dy + bob - 8, 4, now, f.pose != RemotePose::Open);
 }
 
+// The standby screen (no input for REMOTE_DIM_S): mostly black (an AMOLED's black pixels
+// cost nothing), a floating UFO and how to come back, so it never looks switched off.
+void drawStandby(LovyanGFX& d, uint32_t now) {
+  drawStatus(d, now);
+  const int bob = ((now / 700) & 1) ? -4 : 0;
+  ui::drawUfo(d, CX, CY - 20 + bob, 5, now, false);
+  d.setTextDatum(middle_center);
+  d.setFont(&fonts::lgfxJapanGothicP_24);
+  d.setTextColor(shade(kSlate, 1.0f));
+  d.drawString("タッチで もどる", CX, CY + 50);
+  d.setFont(&fonts::lgfxJapanGothicP_16);
+  d.setTextColor(shade(kSlate, 0.7f));
+  char buf[32];
+  snprintf(buf, sizeof(buf), "S%u  %d%%", systemId(), M5.Power.getBatteryLevel());
+  d.drawString(buf, CX, CY + 82);
+}
+
 void draw(uint32_t now) {
   LovyanGFX& d = g_canvas_ok ? static_cast<LovyanGFX&>(g_canvas) : static_cast<LovyanGFX&>(M5.Display);
   if (!g_canvas_ok) M5.Display.startWrite();
   d.fillScreen(TFT_BLACK);
+  if (g_dim) {
+    drawStandby(d, now);
+    if (g_canvas_ok)
+      g_canvas.pushSprite(0, 0);
+    else
+      M5.Display.endWrite();
+    return;
+  }
   drawStatus(d, now);
   const Item* items = ring();
   for (int i = 0; i < kSegments; ++i) drawSegment(d, i, items[i], now);
@@ -495,6 +532,31 @@ void draw(uint32_t now) {
     M5.Display.endWrite();
 }
 
+// ---- display on a cold start ---------------------------------------------------------
+// Switched on from the power button (a true power-on), the screen could stay black while
+// everything else ran; a warm restart (flashing, a USB reset) always brought it back: the
+// power chip and the I/O expander that power the AMOLED are then already up when M5GFX
+// starts the panel. So a power-on boot restarts once, after they are up. The flag lives in
+// RTC memory: kept over a software restart, cleared by a real power-off (no restart loop).
+RTC_NOINIT_ATTR uint32_t g_warm_restart_magic;
+constexpr uint32_t kWarmRestartMagic = 0x57A4D0E5;
+constexpr uint8_t kPm1Addr = 0x6E, kIoeAddr = 0x4F;  // the power chip / the I/O expander
+constexpr uint32_t kI2cFreq = 100000;
+
+void warmRestartAfterPowerOn() {
+  const esp_reset_reason_t why = esp_reset_reason();
+  if (why == ESP_RST_POWERON || why == ESP_RST_BROWNOUT) {
+    if (g_warm_restart_magic != kWarmRestartMagic) {
+      g_warm_restart_magic = kWarmRestartMagic;
+      Serial.println("cold power-on: restarting once so the display starts warm");
+      Serial.flush();
+      delay(600);  // the expander up
+      ESP.restart();
+    }
+  }
+  g_warm_restart_magic = 0;  // the next real power-on restarts again
+}
+
 }  // namespace
 
 void setup() {
@@ -503,6 +565,7 @@ void setup() {
   cfg.internal_mic = false;
   M5.begin(cfg);
   Serial.begin(115200);
+  warmRestartAfterPowerOn();  // a true power-on: once more, warm (see above)
   M5.Display.setBrightness(REMOTE_BRIGHTNESS);
   CX = M5.Display.width() / 2;
   CY = M5.Display.height() / 2;
@@ -517,6 +580,8 @@ void setup() {
                 REMOTE_TILT_SWAP_XY, REMOTE_TILT_INVERT_X, REMOTE_TILT_INVERT_Y, REMOTE_HOLD_MS);
   g_last_input = millis();
   g_page_ms = millis();
+  Serial.printf("reset reason: %d (1 power-on, 3 software, 4 panic, 5-7 watchdog, 9 brownout)\n",
+                static_cast<int>(esp_reset_reason()));
 }
 
 // Debug over the USB serial: "S" -> "SHOT w h\n" + the screen as raw RGB565 (big endian)
@@ -525,6 +590,25 @@ void serviceSerial(uint32_t now) {
   while (Serial.available()) {
     const int c = Serial.read();
     if (c == 'P') showPage(g_page == Page::Staff ? Page::Play : Page::Staff, now);
+    if (c == 'Q') {  // debug: the power chip's and the I/O expander's registers
+      for (uint8_t addr : {kPm1Addr, kIoeAddr}) {
+        Serial.printf("regs 0x%02X:", addr);
+        for (int r = 0; r < 0x50; ++r) Serial.printf(" %02X", M5.In_I2C.readRegister8(addr, r, kI2cFreq));
+        Serial.println();
+      }
+    }
+    if (c == 'D') {  // debug: dim now (as after REMOTE_DIM_S without input)
+      g_last_input = now - REMOTE_DIM_S * 1000UL - 1;
+    }
+    if (c == '?') {
+      Serial.printf("state: up %lu s, dim %d, page %s, hub %d, session %d, streaming %d, battery %d%%, "
+                    "charging %d, heap %u, psram %u, reset %d\n",
+                    static_cast<unsigned long>(now / 1000), g_dim, g_page == Page::Staff ? "staff" : "play",
+                    g_runtime.core().hubLinkUp(), g_runtime.core().sessionValid(), g_app.streaming(),
+                    M5.Power.getBatteryLevel(), static_cast<int>(M5.Power.isCharging()),
+                    static_cast<unsigned>(ESP.getFreeHeap()), static_cast<unsigned>(ESP.getFreePsram()),
+                    static_cast<int>(esp_reset_reason()));
+    }
     if (c != 'S' || !g_canvas_ok) continue;
     draw(millis());
     Serial.printf("SHOT %d %d\n", g_canvas.width(), g_canvas.height());
@@ -553,12 +637,14 @@ void loop() {
 
   if (!g_dim && now - g_last_input > REMOTE_DIM_S * 1000UL && !g_app.streaming()) {
     g_dim = true;
-    M5.Display.setBrightness(8);
+    M5.Display.setBrightness(REMOTE_STANDBY_BRIGHTNESS);
+    g_dirty = true;
+    Serial.printf("[%lu] screen: dimmed (no input for %d s)\n", static_cast<unsigned long>(now), REMOTE_DIM_S);
   }
   if (g_flash && static_cast<int32_t>(now - g_flash_until) >= 0) g_flash = nullptr;
   if (g_msg_until && static_cast<int32_t>(now - g_msg_until) >= 0) g_msg_until = 0;
-  // the icons always move: ~20 frames a second; dimmed: once a second
-  const uint32_t period = g_dim ? 1000 : 50;
+  // the icons always move: ~20 frames a second; the standby screen: a slow float
+  const uint32_t period = g_dim ? 350 : 50;
   if ((g_dirty && now - g_last_draw >= 30) || now - g_last_draw >= period) {
     g_dirty = false;
     g_last_draw = now;
