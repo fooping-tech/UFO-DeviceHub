@@ -5,7 +5,7 @@
 ```
 ~/.platformio/penv/bin/pio test -e native                       # ファームウェアのロジック（C++, Unity）
 uv run --no-project --with pyserial --with pytest python -m pytest   # PC ライブラリ + Mock（または pip install -r pc/requirements.txt; pytest）
-~/.platformio/penv/bin/pio run                                   # 2 システム × 4 台分のビルド（hub_s1 ... m5dial_2_s2）
+~/.platformio/penv/bin/pio run                                   # 両システムの default_envs のビルド（hub_s1 ... m5dial_2_s2）
 ```
 
 | スイート | 内容 |
@@ -78,11 +78,12 @@ uv run --no-project --with pyserial --with pytest python -m pytest   # PC ライ
 
 ### 2.3b ゲームモードの LED・排出同期（[game-mode-interface.md](game-mode-interface.md)、**すべて未確認**）
 
-2 台とも同じ版（fw 0.3）に書き込み、Hub も書き換えてから行う。記録には `--trace FILE` のログと Dial のシリアル出力を添える。
+Dial はシステムごとに 1 台（dial1 = 0x20）。dial2 を使う項目（D9、G3 の dial2、G8、G9）は 2 台目を足したときだけ行う。
+Dial を同じ版（fw 0.3 以降）に書き込み、Hub も書き換えてから行う。記録には `--trace FILE` のログと Dial のシリアル出力を添える。
 
 | # | 手順 | 合格条件 |
 |---|---|---|
-| G1 | `devices` | Hub・Dial 2 台の `fw` が `0.3` |
+| G1 | `devices` | Hub・Dial の `fw` が `0.3` 以降 |
 | G2 | `dialfx dial1 CHASE TO_SCREEN` → `dialfx dial1 CHASE TO_DIAL` | G1・G15 の両方で、2 列がそろって画面側へ / 実機側へ流れて見える。逆なら `DIAL_LED_REVERSED` / `DIAL_TRANSFER_LED_REVERSED`、2 列がずれるなら `_FOLDED` と LED 数を見直して記録 |
 | G2b | `dialfx dial1 WIPE TO_SCREEN - 3000 NORMAL TRANSFER` | G15 の LED が端から端まで満ちる（途中で止まる・余るなら `DIAL_TRANSFER_LED_COUNT` を実数に直す） |
 | G3 | `status dial1` / `status dial2` | `unit_color` が 1 号機シアン・2 号機マゼンタ。`dialcolor dial2 '#FF8000'` で変わり、PC を再接続すると既定に戻る |

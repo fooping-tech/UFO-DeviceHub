@@ -8,11 +8,11 @@
                  Hub (M5AtomS3R)  (firmware/hub)
                        |  ESP-NOW 暗号化ユニキャスト, 固定チャネル, システム別 magic
           +------------+------------+
-   Illumination     M5Dial #1    M5Dial #2      (firmware/illumination, firmware/m5dial)
-   WS2811/COB/Mist  SG90 / SW    SG90 / SW
+   Illumination     M5Dial (0x20)  Staff remote   (firmware/illumination, firmware/m5dial,
+   WS2811/COB/Mist  SG90 / SW      M5StopWatch     firmware/staff_remote)
 ```
 
-同じ会場に、この構成がもう 1 セット（システム 2）ある。分離の仕組みは [multi-system.md](multi-system.md) を参照。
+同じ会場に、この構成がもう 1 セット（システム 2）ある。**Dial はシステムごとに 1 台**（Dial1 = ID 0x20）。2 台目の ID 0x21（`m5dial_2_*` env）はプロトコル・ファーム・テストに残しているが、展示では使わない（ゲームは CoreXY_UFO_Game #200 から Dial1 だけを使う）。分離の仕組みは [multi-system.md](multi-system.md) を参照。
 
 責務の分離:
 
@@ -45,7 +45,7 @@ pc/                       # protocol.py, device_gateway.py, mock_hub.py
 * 通信コードは `shared/` に 1 つだけ。Hub と子機で重複実装しない。
 * 「純 C++」のファイルは Arduino に依存せず、`pio test -e native` でホスト上でテストする。
   ハードウェアは `RelayOutput`, `ServoOutput`, `NodeTransport`, `RadioOutput`, `LineOutput` のインターフェース越しに触る。
-* M5Dial は 1 つのファームウェアで、`-DUFO_DEVICE_ID=0x20/0x21`（`m5dial_1` / `m5dial_2` env）だけが違う。
+* M5Dial は 1 つのファームウェアで、`-DUFO_DEVICE_ID=0x20/0x21`（`m5dial_1` / `m5dial_2` env）だけが違う。展示で使うのは 0x20 の 1 台だけ。
 
 ## 実行モデル（全機器共通）
 

@@ -40,7 +40,8 @@ ATOM Lite + Atomic PWM Base + Unit 2Relay。旧 `atom_led_mist` スケッチの�
 | 項目 | 設定 | 初期値 | 備考 |
 |---|---|---|---|
 | WS2811 データ | `ILLUM_LED_PIN` | 21（ベースの「21」の穴） | |
-| LED 数 / 種類 / 色順 | `ILLUM_LED_COUNT` / `ILLUM_LED_CHIPSET` / `ILLUM_LED_COLOR_ORDER` | 70 / WS2811 / GRB | 起動時に赤 → 緑 → 青と光れば、色順は正しい |
+| LED 数 / 種類 / 色順 | `ILLUM_LED_COUNT` / `ILLUM_LED_CHIPSET` / `ILLUM_LED_COLOR_ORDER` | 23 / WS2811 / GRB | 起動時に赤 → 緑 → 青と光れば、色順は正しい。個数は棚の配置（下）と一致させる（違うとビルドエラー） |
+| 配置の確認 | `ILLUM_LAYOUT_TEST_AT_BOOT` | 1 | 色順の確認のあと、柱と正面を 1 個ずつ順に点ける（下の「棚の LED 配置」） |
 | LED 輝度上限 | `ILLUM_LED_MAX_BRIGHTNESS` | 200 | 電源容量に合わせて調整する |
 | COB テープ PWM | `ILLUM_COB_PIN` | 22（Atomic PWM Base） | 10 kHz / 10 bit、2 乗カーブ。-1 で COB テープなし |
 | COB 輝度上限 | `ILLUM_COB_MAX_BRIGHTNESS` | 255 | まぶしければ下げる |
@@ -54,6 +55,28 @@ ATOM Lite + Atomic PWM Base + Unit 2Relay。旧 `atom_led_mist` スケッチの�
 | リレー極性 | `ILLUM_RELAY_ACTIVE_HIGH` | `{1}` | **未確認** |
 | 最大 ON 時間 / 再噴射禁止 | `ILLUM_RELAY_MAX_ON_MS` / `ILLUM_RELAY_COOLDOWN_MS` | 3000 / 2000 ms | |
 | セッション終了時の照明 | `ILLUM_SESSION_END_LIGHT_MODE` | 1 (IDLE) | |
+
+### 棚の LED 配置（WS2811）
+
+1 個 = WS2811 の IC 1 個（独立して色を指定できる単位）。ATOM は棚の上部にあり、データ線は次の順につながる。
+
+| 順 | 場所 | 配線の向き | 個数 | 電気的な番号 |
+|---|---|---|---|---|
+| 1 | 左手前の柱 | 上 → 下 | 4 | 0〜3 |
+| 2 | 棚の正面 | 左 → 右 | 7 | 4〜10 |
+| 3 | 右手前の柱 | 下 → 上 | 4 | 11〜14 |
+| 4 | 右奥の柱 | 上 → 下 | 4 | 15〜18 |
+| 5 | 左奥の柱 | 下 → 上 | 4 | 19〜22 |
+
+配線（電気的な順番）と棚の上の位置は分けて持つ。**配線を知っているのは `firmware/illumination/shelf_layout.h` の `kRuns` だけ**で、演出は位置から描く:
+
+* `shelf::index(Part, pos, From)`: 「右手前の柱の上から 2 個目」のように場所で指定する（`From::Top` / `Bottom` / `Left` / `Right`）。配線が下 → 上の柱でも「上から」は上から。
+* `shelf::pixel(i)`: 番号 i の場所（`part`、`pos`、`height` = 0 下〜255 上、`around` = 上から見て時計回りに 0〜255、左手前 0・右手前 64・右奥 128・左奥 192。正面はその間 0〜64）。
+* 柱ごと・正面だけ・全体の制御、柱を昇る／降りる光、棚のまわりを回る光は、この 2 つで書く。
+* 配線が変わったら `kRuns` と `ILLUM_LED_COUNT` を直す。柱の間の配線に演出に使わない IC がある場合は `Part::Unused` の区間として `kRuns` に入れる（暗いまま）。
+* **未確認**: 正面の高さ（`kFrontHeight`、いまは柱の下端 = 0 としている）、1 個の IC が点ける LED の数。
+
+起動時（`ILLUM_LAYOUT_TEST_AT_BOOT` = 1）、色順の確認のあと、左手前（赤）→ 右手前（緑）→ 右奥（青）→ 左奥（黄）の柱を上から下へ、最後に正面（白）を左から右へ 1 個ずつ点ける。この順に光らなければ `kRuns` が実物と合っていない。
 
 ### ミストの安全仕様
 
@@ -85,7 +108,9 @@ ATOM Lite + Atomic PWM Base + Unit 2Relay。旧 `atom_led_mist` スケッチの�
 * ローカル操作は Hub がなくても動く（展示の単体運用・実機確認用）。ローカルのミストも最大 10 分で止まる。
 * PC のセッションが始まるとローカル操作は終了する（ミスト OFF、照明は `ILLUM_SESSION_END_LIGHT_MODE`）。セッション中の短押しは無視する（状態 LED が紫に光る）。
 
-## M5Dial ×2（Device ID 0x20 / 0x21）
+## M5Dial（Device ID 0x20、システムごとに 1 台）
+
+展示で使うのは 0x20 の 1 台だけ。0x21（`m5dial_2_*`）は同じファームで、2 台目を足すときのために残している。
 
 NeoGacha `src/M5Dial_Gacha` から確認した値をそのまま初期値にしている。
 
@@ -272,13 +297,13 @@ SG90 は動き始めと引っかかったときに最大 0.7 A ほど流れ、M5
 | モード | WS2811 | COB |
 |---|---|---|
 | OFF | 消灯 | 消灯 |
-| IDLE | pacifica | ゆっくり明暗 |
-| STUDY | 暖色の呼吸 | 明るめで一定（デスクライト） |
-| GAME_READY | シアンのチェイス | 暗め |
-| GAME_PLAY | レインボー（speed で速度） | 暖色の下地 |
-| RESULT | ゴールドのきらめき | やや明るい |
+| IDLE | タイトルのショー: 棚のまわりを回る虹 → 柱ごとに色の違う光が昇る（正面は色が流れる）→ 紙吹雪、を 7 秒ごとに切り替える | 速めの明暗 |
+| STUDY | 白っぽい明るい色で一定 | 全灯（電球色のデスクライト） |
+| GAME_READY | シアンの光が 1 秒ごとに柱を昇る、正面は両端から中央へ満ちる | 暗め |
+| GAME_PLAY | 棚のまわりを回る虹 + 柱を昇る波（speed で速さ。speed ≥ 200 = 残り時間わずかで白いフラッシュ） | 暖色の下地 |
+| RESULT | ゴールドが噴水のように柱を昇る + きらめき | やや明るい |
 | ERROR | 赤点滅 1 Hz | 消灯 |
-| CUSTOM | `color`。speed=0 で点灯、>0 で呼吸 | `brightness` |
+| CUSTOM | `color`。speed=0 で点灯、>0 で柱を昇るうねり（speed ≥ 160 で白いきらめき。ゲームの x2 のゴールド） | `brightness` |
 | AURORA | 青緑〜紫が流れる | ゆったり明暗 |
 | STORM | 雷雲 + 稲妻 | 普段はほのか、稲妻で明るく |
 | CAMPFIRE | 炎（Fire2012） | ロウソクのゆらぎ |
@@ -288,4 +313,5 @@ SG90 は動き始めと引っかかったときに最大 0.7 A ほど流れ、M5
 
 MIST_GLOW / MAGIC_PUFF はミストの出力に連動するので、`SET_MIST` と組み合わせて使う。
 `transition_ms` を指定すると、モード切替時に WS2811 と COB の両方がクロスフェードする。演出（既定時間）: GAME_START 1500, ARM_MOVE 600, ARM_DESCEND 1200, CATCH 800, BALL_RECEIVED 1000, BALL_RELEASED 1000, SCORE 1500, GAME_CLEAR 4000, GAME_OVER 2500 ms（最大 10000 ms）。
+WS2811 の演出（棚の配置で描く）: GAME_START = 白い光が全部の柱を駆け上がってから点滅、ARM_MOVE = 青い彗星が棚のまわりを回る、ARM_DESCEND = 紫が柱を降りる、CATCH = 黄色で柱と正面が交互に点滅、BALL_RECEIVED = 緑が昇る（カプセルが UFO へ上がる）、BALL_RELEASED = シアンが降りる、SCORE = 白く光ってから正面の中央からゴールドが棚のまわりへ広がる、GAME_CLEAR = 速く回る虹 + 白い火花、GAME_OVER = 赤が柱を下へ抜けて消える。
 演出中、COB は GAME_START で明るくなっていき、CATCH で点滅、SCORE / GAME_CLEAR で全灯、GAME_OVER でフェードアウトする。

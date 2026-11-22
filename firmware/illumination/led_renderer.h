@@ -1,6 +1,7 @@
 // LED renderer for the Illumination ATOM: draws the persistent mode, the
 // temporary effect on top of it and cross-fades on mode changes, on two outputs:
-//   * the addressable strip (WS2811 tape, FastLED)
+//   * the addressable strip (WS2811, FastLED), drawn from where each pixel is on
+//     the shelf (shelf_layout.h), not from its place on the data line
 //   * the COB tape (single channel, PWM through the Atomic PWM Base)
 // Non-blocking: render() draws at most one frame per call (~60 fps).
 #pragma once
@@ -20,6 +21,11 @@ class LedRenderer {
   // Boot check (blocking, ~1.5 s, setup() only): red -> green -> blue means
   // ILLUM_LED_COLOR_ORDER is right.
   void colorOrderTest();
+  // Boot check of the shelf layout (blocking, ~2 s, setup() only): the pillars
+  // light one pixel at a time from the top down (front-left red, front-right
+  // green, back-right blue, back-left yellow), then the front face from left to
+  // right in white. Anything else: fix shelf_layout.h (kRuns).
+  void layoutTest();
   // mist_on: the mist relay is ON right now (MIST_GLOW / MAGIC_PUFF follow it).
   void render(const LightingController& lc, bool mist_on, uint32_t now);
   uint32_t frames() const { return frames_; }

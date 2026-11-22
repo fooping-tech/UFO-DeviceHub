@@ -1,13 +1,13 @@
 # 同一会場で 2 システムを運用する（ESP-NOW の混信対策）
 
-UFO-DeviceHub を使った展示（Hub + Illumination + M5Dial ×2 + PC）が、同じ会場で **2 セット**動く前提で設計している。
+UFO-DeviceHub を使った展示（Hub + Illumination + M5Dial 1 台 + スタッフ用リモコン + PC）が、同じ会場で **2 セット**動く前提で設計している。
 それぞれを **システム 1 / システム 2** と呼ぶ。片方の命令がもう片方の機器を動かしたり、通信が混ざったりしないように、次の 5 層で分離する。
 
 ```
              システム 1（CH 1）                         システム 2（CH 11）
 PC1 --USB-- Hub S1 (AtomS3R, 画面 "SYSTEM 1")    PC2 --USB-- Hub S2 (AtomS3R, 画面 "SYSTEM 2")
               |  magic 0x5546, 鍵セット S1                    |  magic 0x5547, 鍵セット S2
-   Illum S1 / Dial1 S1 / Dial2 S1                  Illum S2 / Dial1 S2 / Dial2 S2
+   Illum S1 / Dial1 S1 / Remote S1                 Illum S2 / Dial1 S2 / Remote S2
 ```
 
 ## 1. 分離の仕組み
@@ -36,7 +36,10 @@ PC1 --USB-- Hub S1 (AtomS3R, 画面 "SYSTEM 1")    PC2 --USB-- Hub S2 (AtomS3R, 
 | Hub（M5AtomS3R） | `pio run -e hub_s1 -t upload` | `pio run -e hub_s2 -t upload` |
 | Illumination ATOM | `illumination_s1` | `illumination_s2` |
 | M5Dial #1 | `m5dial_1_s1` | `m5dial_1_s2` |
-| M5Dial #2 | `m5dial_2_s1` | `m5dial_2_s2` |
+| スタッフ用リモコン | `staff_remote_s1` | `staff_remote_s2` |
+| （M5Dial #2、0x21） | （`m5dial_2_s1`） | （`m5dial_2_s2`） |
+
+Dial はシステムごとに 1 台（#1 = 0x20）。#2 の env は 2 台目を足すときのために残している。
 
 ATOM Lite を Hub にする場合は `hub_atomlite_s1` / `hub_atomlite_s2`（画面の代わりに状態 LED を使う）。
 
