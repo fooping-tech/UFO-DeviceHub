@@ -43,6 +43,9 @@ enum class EventCode : uint8_t {
   RelayDone = 0x20,       // u8 relay_id, u16 on_ms, u8 RelayEndReason
   MistDone = 0x21,        // u16 on_s, u8 RelayEndReason
   DeviceError = 0x30,     // u8 ErrorCode, u8 detail
+  // Staff remote (M5StopWatch, fw 0.6+). It only reports; the game decides.
+  StaffAction = 0x40,     // u8 StaffAction: one of the game's named staff operations
+  RemoteInput = 0x41,     // u8 RemoteButton bits, i8 tilt_x, i8 tilt_y (-100..100), u8 RemotePose, u16 frame
 };
 
 // ---- ACK result ---------------------------------------------------------------
@@ -76,6 +79,7 @@ enum class DeviceType : uint8_t {
   Hub = 0x01,
   Illumination = 0x02,
   Dial = 0x03,
+  StaffRemote = 0x04,
 };
 
 enum class OperationMode : uint8_t {
@@ -186,6 +190,38 @@ enum class DialRequest : uint8_t {
   GameEnd = 0x02,
 };
 
+// The game's staff operations (CoreXY_UFO_Game docs/staff_operations.md: F6..F10 + Space),
+// sent by the staff remote (EventCode::StaffAction). Names are the game's, in capitals.
+enum class StaffAction : uint8_t {
+  Next = 0x01,     // F6
+  Skip = 0x02,     // F7
+  Menu = 0x03,     // F8
+  Recover = 0x04,  // F9 (the arm moves: the remote asks for a long press)
+  Switch = 0x05,   // F10
+  Stop = 0x06,     // Space
+};
+
+// The remote's hand-like input (EventCode::RemoteInput): bits of `buttons`.
+enum class RemoteButton : uint8_t {
+  Move = 0x01,  // the move button is held: steer with the tilt (like a pinch)
+  AxisZ = 0x02,  // the tilt's forward/back steers Z (like a palm-down pinch)
+};
+inline uint8_t u8(RemoteButton b) { return static_cast<uint8_t>(b); }
+
+// The hand shape the remote shows (like the camera's poses).
+enum class RemotePose : uint8_t {
+  Open = 0x00,   // neutral
+  Fist = 0x01,   // catch (claw close / the easy mode's catch)
+  Peace = 0x02,  // claw open
+  Point = 0x03,  // one finger: carry to the portal (easy mode)
+};
+
+// state() of the staff remote (heartbeat / STATUS)
+enum class RemoteState : uint8_t {
+  Idle = 0x00,
+  Active = 0x01,  // input is being sent
+};
+
 enum class ReleaseFailReason : uint8_t {
   Aborted = 0x01,         // STOP_ALL during the sequence
   LinkLost = 0x02,        // configured to abort on link loss
@@ -229,6 +265,8 @@ inline uint8_t u8(NodeFlag f) { return static_cast<uint8_t>(f); }
 const char* commandName(uint8_t code);
 const char* eventName(uint8_t code);
 const char* dialRequestName(uint8_t request);  // nullptr = unknown
+const char* staffActionName(uint8_t action);    // nullptr = unknown
+const char* remotePoseName(uint8_t pose);       // nullptr = unknown
 const char* ackResultName(uint8_t code);
 
 // Commands that change the physical world require an established session.
@@ -314,6 +352,12 @@ struct EventData {
   uint8_t reason = 0;        // ReleaseFailed / RelayDone / MistDone / DeviceError(code) / DialRequest(request)
   uint8_t relay_id = 0;      // RelayDone
   uint8_t detail = 0;        // DeviceError
+  // RemoteInput (StaffAction uses `reason`)
+  uint8_t buttons = 0;       // RemoteButton bits
+  int8_t tilt_x = 0;         // -100..100, + = right
+  int8_t tilt_y = 0;         // -100..100, + = forward (away from the holder)
+  uint8_t pose = 0;          // RemotePose
+  uint16_t frame = 0;        // the remote's input frame counter (order; wraps)
 };
 size_t encodeEvent(const EventData& e, uint8_t* out, size_t cap);
 bool decodeEvent(const uint8_t* in, size_t len, EventData& e);

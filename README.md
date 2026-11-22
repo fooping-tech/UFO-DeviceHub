@@ -17,8 +17,9 @@ UFO Game の ESP マイコン系デバイス（Hub、Illumination、M5Dial ×2�
 | **ESP-NOW 用ハブ（M5AtomS3R）** | 子機との無線連携、中継。画面にシステム番号・チャネル・接続状態を表示 | PC から USB、子機と無線 |
 | **イルミ ATOM** | WS2811 テープ + COB テープの照明演出、ミスト（噴霧）モジュール、本体ボタンでのローカル演出 | ハブと無線 |
 | **M5Dial ×2** | ボール受取スイッチ、SG90 によるボール排出、状態表示 | ハブと無線 |
+| **スタッフ用リモコン（M5StopWatch）** | 展示スタッフの手元の操作: ゲームのスタッフ操作（つぎへ・とばす・メニュー・ふっき・きりかえ・ストップ）と、カメラを使わない操作（ボタン + 傾きで移動、つかむ・はなす・ポータル） | ハブと無線 |
 
-**このリポジトリが扱うのは太字の 4 台（ESP-NOW 用 ATOM ハブ、イルミ ATOM、M5Dial ×2）と、PC 側のクライアントライブラリ。**
+**このリポジトリが扱うのは太字の機器（ESP-NOW 用 ATOM ハブ、イルミ ATOM、M5Dial ×2、スタッフ用リモコン）と、PC 側のクライアントライブラリ。**
 Core2・Core XYZ・コントローラ ATOM は 別リポジトリ（CoreXY_UFO / CoreXY_UFO_Game）で扱う。
 
 図ではハブと子機の間が「Wi-Fi（LAN 内通信）」と描かれているが、実装は AP に接続しない **ESP-NOW の暗号化ユニキャスト（固定チャネル）**。
@@ -91,6 +92,7 @@ pio run -e illumination_s1 -t upload          # Illumination ATOM (0x10)  シス
 pio run -e m5dial_1_s1     -t upload          # M5Dial #1 (0x20)          システム 1
 pio run -e m5dial_2_s1     -t upload          # M5Dial #2 (0x21)          システム 1
 pio run -e hub_s2          -t upload          # ... システム 2 は _s2
+pio run -e staff_remote_s2 -t upload          # スタッフ用リモコン M5StopWatch (0x30)  システム 2（Hub も書き直す）
 pio run -e hub_atomlite_s1 -t upload          # Hub を ATOM Lite にする場合（画面なし、状態 LED）
 pio run -e noise           -t upload          # 試験用: 他展示を模擬するノイズ送信機
 ```
@@ -120,13 +122,24 @@ ATOM Lite + Atomic PWM Base + Unit 2Relay。旧 `atom_led_mist` スケッチの�
 
 メニュー・設定モードの使い方とサーボの電源対策（配線側の対策を含む）は [docs/hardware.md](docs/hardware.md#設定モードハードウェアテスト)。
 
+### スタッフ用リモコン（M5StopWatch、fw 0.6〜）
+
+ゲームの画面のボタンやキーボードを使わずに、展示スタッフが手元で操作する。リモコンは押されたことを送るだけで、どうするかはゲームが決める。
+
+| 画面（青ボタンで切り替え） | 操作 | イベント |
+|---|---|---|
+| スタッフ | つぎへ・とばす・メニュー・きりかえ・ストップをタップ、ふっきは 1 秒長押し、黄ボタン = つぎへ | `STAFF_ACTION`（ゲームの F6〜F10・Space と同じ意味） |
+| そうさ | 黄ボタンを押しながら傾ける（じょうげ をオンにすると前後でアームの上げ下げ）、つかむ・はなす・ポータル | `REMOTE_INPUT`（ゲームは手のジェスチャーと同じ経路で受け取る） |
+
+**リモコンを足すときは Hub も書き直す**（Hub の機器表に入る）。`config/devices.h` に `UFO_Sn_MAC_STAFF_REMOTE`、`config/secrets.h` に鍵（`python3 tests/tools/gen_secrets.py` で足りない鍵だけ追加。既存の鍵は変わらない。追加したら他の PC にも secrets.h を配り直す）。詳細は [docs/hardware.md](docs/hardware.md#スタッフ用リモコンm5stopwatchdevice-id-0x30)。
+
 （`pio` が PATH にない場合は `~/.platformio/penv/bin/pio`）
 
 ## テスト
 
 ```sh
-pio test -e native                                              # ファームウェアのロジック 81 件
-uv run pytest                                                   # Python 145 件（Mock 使用）
+pio test -e native                                              # ファームウェアのロジック 118 件
+uv run pytest                                                   # Python 157 件（Mock 使用）
 # uv のプロジェクトを使わない書き方も通る: uv run --no-project --with pyserial --with pytest python -m pytest
 ```
 
@@ -193,7 +206,7 @@ from ufo_devicehub import protocol as P
 
 ```
 shared/        共通プロトコル（パケット、payload、信頼性、子機コア、ESP-NOW、LED 演出）
-firmware/      hub/（AtomS3R 画面表示を含む）, illumination/（LED・COB・ミスト・ボタン）, m5dial/
+firmware/      hub/（AtomS3R 画面表示を含む）, illumination/（LED・COB・ミスト・ボタン）, m5dial/, staff_remote/（M5StopWatch）
 config/        *.example.h（実設定はコピーして作成）
 pyproject.toml Python パッケージ ufo-devicehub の定義（pc/ と ufo_devicehub/ だけを含む）
 ufo_devicehub/ ほかのプロジェクトが使う import 名（公開 API。中身は pc/）

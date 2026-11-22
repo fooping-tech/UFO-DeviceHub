@@ -59,9 +59,24 @@ class FakeEmitter : public EventEmitter {
   uint32_t emit(const EventData& e, uint32_t /*now*/) override {
     if (!accept) return 0;  // like NodeCore without a session
     events.push_back(e);
+    if (hold) queued.push_back(e.code);
     return ++next_id;
   }
+  size_t pending() const override { return backlog + queued.size(); }
+  size_t dropPending(EventCode code) override {
+    size_t n = 0;
+    for (size_t i = queued.size(); i-- > 0;)
+      if (queued[i] == static_cast<uint8_t>(code)) {
+        queued.erase(queued.begin() + i);
+        ++n;
+      }
+    return n;
+  }
+  bool hold = false;              // emitted events stay "queued" (not acknowledged) until ack_all()
+  std::vector<uint8_t> queued;    // codes of the queued events
+  void ack_all() { queued.clear(); }
   bool accept = true;
+  size_t backlog = 0;  // events "not yet acknowledged" (pending())
   size_t count(EventCode c) const {
     size_t n = 0;
     for (const auto& e : events)

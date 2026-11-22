@@ -102,6 +102,19 @@ size_t ReliableQueue::purge(uint8_t dest) {
   return n;
 }
 
+size_t ReliableQueue::purgeEvent(uint8_t event_code) {
+  size_t n = 0;
+  for (size_t i = 0; i < cap_; ++i) {
+    Entry& e = entries_[i];
+    if (e.used && e.len > kHeaderSize && e.data[5] == static_cast<uint8_t>(MsgType::Event) &&
+        e.data[kHeaderSize] == event_code) {
+      e.used = false;
+      ++n;
+    }
+  }
+  return n;
+}
+
 size_t ReliableQueue::purgeSession(uint32_t keep_session) {
   size_t n = 0;
   for (size_t i = 0; i < cap_; ++i) {

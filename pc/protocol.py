@@ -57,6 +57,7 @@ class DeviceId(IntEnum):
     ILLUMINATION = 0x10
     M5DIAL_1 = 0x20
     M5DIAL_2 = 0x21
+    STAFF_REMOTE = 0x30  # M5StopWatch: the exhibition staff's remote (fw 0.6+)
 
 
 class CommandCode(IntEnum):
@@ -86,6 +87,8 @@ class EventCode(IntEnum):
     RELAY_DONE = 0x20
     MIST_DONE = 0x21
     DEVICE_ERROR = 0x30
+    STAFF_ACTION = 0x40
+    REMOTE_INPUT = 0x41
 
 
 class AckResult(IntEnum):
@@ -117,6 +120,7 @@ class DeviceType(IntEnum):
     HUB = 0x01
     ILLUMINATION = 0x02
     DIAL = 0x03
+    STAFF_REMOTE = 0x04
 
 
 class OperationMode(IntEnum):
@@ -231,6 +235,39 @@ class DialRequest(IntEnum):
 
     GAME_RESTART = 0x01
     GAME_END = 0x02
+
+
+class StaffAction(IntEnum):
+    """The game's staff operations, sent by the staff remote (event STAFF_ACTION,
+    data.action = the name). CoreXY_UFO_Game docs/staff_operations.md: F6..F10 + Space."""
+
+    NEXT = 0x01
+    SKIP = 0x02
+    MENU = 0x03
+    RECOVER = 0x04
+    SWITCH = 0x05
+    STOP = 0x06
+
+
+class RemoteButton(IntFlag):
+    """REMOTE_INPUT buttons: data.move / data.z in the hub's JSON."""
+
+    MOVE = 0x01  # held: the tilt steers (like a pinch)
+    AXIS_Z = 0x02  # the forward / back tilt steers Z (like a palm-down pinch)
+
+
+class RemotePose(IntEnum):
+    """The hand shape the remote shows (REMOTE_INPUT data.pose = the name)."""
+
+    OPEN = 0x00
+    FIST = 0x01
+    PEACE = 0x02
+    POINT = 0x03
+
+
+class RemoteState(IntEnum):
+    IDLE = 0x00
+    ACTIVE = 0x01
 
 
 class ReleaseFailReason(IntEnum):
@@ -584,6 +621,11 @@ def encode_event_payload(code: EventCode, **f: int) -> bytes:
         return struct.pack("<BHB", code, f.get("on_s", 0), f.get("reason", 0))
     if code == EventCode.DEVICE_ERROR:
         return struct.pack("<BBB", code, f.get("code", 0), f.get("detail", 0))
+    if code == EventCode.STAFF_ACTION:
+        return struct.pack("<BB", code, f.get("action", 0))
+    if code == EventCode.REMOTE_INPUT:
+        return struct.pack("<BBbbBH", code, f.get("buttons", 0), f.get("x", 0), f.get("y", 0), f.get("pose", 0),
+                           f.get("frame", 0))
     raise ProtocolError(f"unknown event {code}")
 
 

@@ -13,6 +13,7 @@ from pc import protocol as P
 from pc.mock_hub import MockConfig, MockDial, MockHub
 
 D1, D2, ILL = DeviceId.M5DIAL_1, DeviceId.M5DIAL_2, DeviceId.ILLUMINATION
+REMOTE = DeviceId.STAFF_REMOTE
 
 FAST = MockConfig(
     servo_hold_ms=150, servo_settle_ms=50, relay_cooldown_ms=200, pc_timeout=0.6, pc_event_retry=0.1
@@ -64,7 +65,7 @@ def test_connect_establishes_session(rig):
     assert hub.received[0]["type"] == "HELLO"
     col.wait("GATEWAY_CONNECTED")
     devs = {d["id"]: d for d in gw.get_devices()}
-    assert set(devs) == {ILL, D1, D2} and all(d["online"] for d in devs.values())
+    assert set(devs) == {ILL, D1, D2, REMOTE} and all(d["online"] for d in devs.values())
     assert gw.get_diagnostics()["type"] == "DIAG"
 
 
@@ -272,7 +273,7 @@ def test_stop_all(rig):
     hub, gw, col = rig
     gw.relay_pulse(2000)
     res = gw.stop_all()
-    assert set(res) == {ILL, D1, D2} and all(r.ok for r in res.values())
+    assert set(res) == {ILL, D1, D2, REMOTE} and all(r.ok for r in res.values())
     assert not hub.devices[ILL].relay_on
 
 
@@ -319,6 +320,38 @@ def test_dial_menu_request_event(rig):
     assert not hub.dial_request(D1, "GAME_END")
     with pytest.raises(KeyError):
         hub.dial_request(D2, "GAME_PAUSE")
+
+
+def test_staff_remote_actions(rig):
+    """The staff remote's STAFF_ACTION events: one per press, the action by name and code."""
+    hub, gw, col = rig
+    for i, a in enumerate(["NEXT", "RECOVER", "STOP"], start=1):
+        assert hub.staff_action(a)
+        ev = col.wait("STAFF_ACTION", i)[i - 1]
+        assert ev.source == REMOTE and ev.data["action"] == a and ev.data["code"] == int(P.StaffAction[a])
+    with pytest.raises(KeyError):
+        hub.staff_action("JUMP")
+    hub.set_device_online(REMOTE, False)
+    assert not hub.staff_action("NEXT")
+
+
+def test_staff_remote_input_stream(rig):
+    """REMOTE_INPUT frames: the move key, the tilt, the shape, an increasing frame number."""
+    hub, gw, col = rig
+    assert hub.remote_input(move=True, x=40, y=-100)
+    assert hub.remote_input(move=True, z=True, y=55)
+    assert hub.remote_input(pose="FIST")
+    assert hub.remote_input()  # the closing frame: nothing held
+    evs = col.wait("REMOTE_INPUT", 4)
+    d = [e.data for e in evs]
+    assert d[0] == {"move": True, "z": False, "x": 40, "y": -100, "pose": "OPEN", "frame": 1}
+    assert d[1]["z"] and d[1]["y"] == 55 and d[2]["pose"] == "FIST" and not d[2]["move"]
+    assert d[3] == {"move": False, "z": False, "x": 0, "y": 0, "pose": "OPEN", "frame": 4}
+    with pytest.raises(ValueError):
+        hub.remote_input(x=101)
+    # the remote takes STOP_ALL (ends its stream), nothing else
+    assert gw.send_command(REMOTE, "STOP_ALL", {}).ok
+    assert gw.send_command(REMOTE, "SET_MODE", {"mode": "GAME"}).result == "UNSUPPORTED"
 
 
 def test_ball_ignored_outside_game(rig):

@@ -11,7 +11,7 @@ namespace {
 struct SystemTable {
   uint8_t channel;
   uint8_t pmk[16];
-  DeviceEntry devices[4];
+  DeviceEntry devices[5];
 };
 
 #define UFO_SYSTEM_TABLE(N)                                                                              \
@@ -24,6 +24,8 @@ struct SystemTable {
            UFO_S##N##_LMK_M5DIAL_1},                                                                     \
           {static_cast<uint8_t>(DeviceId::M5Dial2), DeviceType::Dial, "m5dial_2", UFO_S##N##_MAC_M5DIAL_2, \
            UFO_S##N##_LMK_M5DIAL_2},                                                                     \
+          {static_cast<uint8_t>(DeviceId::StaffRemote), DeviceType::StaffRemote, "staff_remote",         \
+           UFO_S##N##_MAC_STAFF_REMOTE, UFO_S##N##_LMK_STAFF_REMOTE},                                    \
     }                                                                                                    \
   }
 

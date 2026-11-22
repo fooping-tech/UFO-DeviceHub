@@ -61,6 +61,12 @@ def main() -> None:
         vec("event_dial_request", Packet(0x21, 0x01, MsgType.EVENT, 21, S, 80,
                                          P.encode_event_payload(EventCode.DIAL_REQUEST,
                                                                 request=P.DialRequest.GAME_END))),
+        vec("event_staff_action", Packet(0x30, 0x01, MsgType.EVENT, 22, S, 81,
+                                         P.encode_event_payload(EventCode.STAFF_ACTION,
+                                                                action=P.StaffAction.RECOVER))),
+        vec("event_remote_input", Packet(0x30, 0x01, MsgType.EVENT, 23, S, 82,
+                                         P.encode_event_payload(EventCode.REMOTE_INPUT, buttons=1, x=-37, y=100,
+                                                                pose=P.RemotePose.FIST, frame=513))),
         vec("event_relay_done", Packet(0x10, 0x01, MsgType.EVENT, 11, S, 78,
                                        P.encode_event_payload(EventCode.RELAY_DONE, relay_id=0, on_ms=1500, reason=0))),
         vec("set_mist_breath", Packet(0x01, 0x10, MsgType.COMMAND, 15, S, 1006, P.encode_command_payload(

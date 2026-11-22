@@ -59,14 +59,28 @@
 #else
 #define UFO_S2_EXAMPLE_KEYS 1
 #endif
+// The staff remote's key came later (fw 0.6): a real key set without it is not
+// silently given the public example key (the remote can ask the game to move the arm).
+#if defined(UFO_S1_PMK) && !defined(UFO_S1_LMK_STAFF_REMOTE)
+#define UFO_S1_MISSING_REMOTE_KEY 1
+#else
+#define UFO_S1_MISSING_REMOTE_KEY 0
+#endif
+#if defined(UFO_S2_PMK) && !defined(UFO_S2_LMK_STAFF_REMOTE)
+#define UFO_S2_MISSING_REMOTE_KEY 1
+#else
+#define UFO_S2_MISSING_REMOTE_KEY 0
+#endif
 #include "secrets.example.h"  // fills only the missing system key sets
 
 #if UFO_SYSTEM_ID == 1
 #define UFO_USING_EXAMPLE_DEVICES UFO_S1_EXAMPLE_DEVICES
 #define UFO_USING_EXAMPLE_KEYS UFO_S1_EXAMPLE_KEYS
+#define UFO_MISSING_REMOTE_KEY UFO_S1_MISSING_REMOTE_KEY
 #else
 #define UFO_USING_EXAMPLE_DEVICES UFO_S2_EXAMPLE_DEVICES
 #define UFO_USING_EXAMPLE_KEYS UFO_S2_EXAMPLE_KEYS
+#define UFO_MISSING_REMOTE_KEY UFO_S2_MISSING_REMOTE_KEY
 #endif
 
 // A firmware built from the example MACs/keys cannot talk to the real hub
@@ -78,6 +92,9 @@
 #if !defined(UFO_ALLOW_EXAMPLE_CONFIG)
 #if UFO_USING_EXAMPLE_DEVICES
 #error "config/devices.h has no MAC table for this UFO_SYSTEM_ID. Copy config/devices.h from the PC that set up this system (see README: building on another PC)."
+#endif
+#if UFO_MISSING_REMOTE_KEY
+#error "config/secrets.h has no key for the staff remote (UFO_Sn_LMK_STAFF_REMOTE, added in fw 0.6). Run: python3 tests/tools/gen_secrets.py (adds only the missing keys), then copy secrets.h to the other PCs."
 #endif
 #if UFO_USING_EXAMPLE_KEYS
 #error "config/secrets.h has no ESP-NOW keys for this UFO_SYSTEM_ID. Copy config/secrets.h from the PC that set up this system (see README: building on another PC). New system: python3 tests/tools/gen_secrets.py"
