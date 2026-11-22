@@ -140,5 +140,6 @@
 #define REMOTE_STOP_HOLD_MS 250        // ストップ
 #define REMOTE_RECOVER_HOLD_MS 1200    // ふっき (the arm moves)
 #define REMOTE_BRIGHTNESS 160
-#define REMOTE_DIM_S 60                // dim the screen after this long without input
+#define REMOTE_STANDBY_BRIGHTNESS 60   // the standby screen (dark, but clearly not off)
+#define REMOTE_DIM_S 60                // the standby screen after this long without input
 #define REMOTE_VIBRATION 255           // strength of the clicks, 0 = no vibration
