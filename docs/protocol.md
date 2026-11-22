@@ -98,6 +98,8 @@ params 長が表と 1 Byte でも違えば `INVALID_PARAMS`。
 | 0x20 | RELAY_DONE | u8 relay_id, u16 on_ms, u8 reason (0 COMPLETED, 1 OFF_COMMAND, 2 SAFETY, 3 WATCHDOG, 4 LOCAL_BUTTON) |
 | 0x21 | MIST_DONE | u16 on_s（実際に ON だった秒数）, u8 reason（RELAY_DONE と同じ）。ローカル操作で動いたミストでは送らない |
 | 0x30 | ERROR | u8 ErrorCode, u8 detail |
+| 0x40 | STAFF_ACTION | u8 StaffAction (1 NEXT, 2 SKIP, 3 MENU, 4 RECOVER, 5 SWITCH, 6 STOP)。スタッフ用リモコン（M5StopWatch、0x30、fw 0.6〜）で押された、ゲームのスタッフ操作（CoreXY_UFO_Game `docs/staff_operations.md` の F6〜F10・Space）。JSON の data は `action`（名前）と `code`。リモコンは送るだけで、どうするかは Game が決める |
+| 0x41 | REMOTE_INPUT | u8 buttons (0x01 MOVE: 移動ボタンを押している, 0x02 AXIS_Z: 前後の傾きで上下), i8 x, i8 y（-100..100、右・奥が +）, u8 RemotePose (0 OPEN, 1 FIST, 2 PEACE, 3 POINT), u16 frame。JSON の data は `move, z, x, y, pose`（名前）, `frame`。押している間 100 ms ごと、離したら 1 回（何も押していない）、その後は送らない。Hub への ACK 待ちが 2 件以上あるときはその回を飛ばす（遅れた傾きをまとめて届けない）。Game は来なくなったら止める |
 
 #### ACK（6 Byte）
 
@@ -134,6 +136,7 @@ flags: `0x01 DUPLICATE`（同じ command_id を処理済み。結果は保存値
 
 共通 15 Byte: `u8 device_type, u8 state, u8 flags, u8 error, u8 op_mode, u32 uptime_ms, u32 boot_id, u8 fw_major, u8 fw_minor`
 + Illumination 18 Byte: `u8 light_mode, u8 brightness, u8 active_effect, u16 effect_remaining_ms, u8 relay_on_mask, u16 relay_remaining_ms, u16 relay_cooldown_ms, u16 relay_pulses, u8 mist_pattern, u8 mist_flags (0x01 OUTPUT_ON, 0x02 LOCAL_MODE), u16 mist_remaining_s, u16 mist_on_s`
++ スタッフ用リモコン: 共通部分だけ（state 0 IDLE / 1 ACTIVE = REMOTE_INPUT を送っている）
 + Dial 18 Byte: `u8 dial_state, u16 cycle, u8 switch_on, u8 servo_deg, u16 releases, u32 last_release_command, u8 sim_button, u8 front_effect, u8 transfer_effect, u8 led_flags (0x01 TRANSFER_FITTED), u8 color_r, u8 color_g, u8 color_b`
   * 末尾 6 Byte はファームウェア 0.3 で追加。0.2 以前の Dial の 12 Byte も受理する（追加項目は 0）
 
@@ -275,6 +278,6 @@ gw.stop_all()
 * すべての命令は `CommandResult` を返す（`.ok`, `.result`, `.duplicate`, `.clamped`, `.attempts`）。`wait=False` で `Future`。
 * 未接続時は `GatewayNotConnected` を送出し **何も送らない**（動作命令を後から送ることはない）。
 * パラメータ不正は `ProtocolError`（送信前）。
-* イベント: `BALL_RECEIVED, RELEASE_STARTED, RELEASE_DONE, RELEASE_FAILED, DIAL_REQUEST, RELAY_DONE, MIST_DONE, ERROR`（機器）と `DEVICE_ONLINE, DEVICE_OFFLINE, DEVICE_REBOOTED, SESSION_CLOSED, GATEWAY_CONNECTED, GATEWAY_DISCONNECTED, HUB_ERROR`（通信層）。
+* イベント: `BALL_RECEIVED, RELEASE_STARTED, RELEASE_DONE, RELEASE_FAILED, DIAL_REQUEST, RELAY_DONE, MIST_DONE, STAFF_ACTION, REMOTE_INPUT, ERROR`（機器）と `DEVICE_ONLINE, DEVICE_OFFLINE, DEVICE_REBOOTED, SESSION_CLOSED, GATEWAY_CONNECTED, GATEWAY_DISCONNECTED, HUB_ERROR`（通信層）。
 * `event_queue()` / `asyncio_queue(loop)` でも受け取れる。
 * `DeviceGateway(trace=TraceLog(path).record)` で命令・ACK・イベントを JSON Lines に記録する（`pc/trace.py`）。名前付きのゲームモード演出は `pc/game_mode.py`。

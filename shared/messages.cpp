@@ -33,6 +33,8 @@ const char* eventName(uint8_t code) {
     case EventCode::RelayDone: return "RELAY_DONE";
     case EventCode::MistDone: return "MIST_DONE";
     case EventCode::DeviceError: return "ERROR";
+    case EventCode::StaffAction: return "STAFF_ACTION";
+    case EventCode::RemoteInput: return "REMOTE_INPUT";
   }
   return nullptr;
 }
@@ -270,6 +272,14 @@ size_t encodeEvent(const EventData& e, uint8_t* out, size_t cap) {
     case EventCode::RelayDone: w.u8(e.relay_id).u16(e.elapsed_ms).u8(e.reason); break;
     case EventCode::MistDone: w.u16(e.on_s).u8(e.reason); break;
     case EventCode::DeviceError: w.u8(e.reason).u8(e.detail); break;
+    case EventCode::StaffAction: w.u8(e.reason); break;
+    case EventCode::RemoteInput:
+      w.u8(e.buttons)
+          .u8(static_cast<uint8_t>(e.tilt_x))
+          .u8(static_cast<uint8_t>(e.tilt_y))
+          .u8(e.pose)
+          .u16(e.frame);
+      break;
     default: return 0;
   }
   return w.ok() ? w.size() : 0;
@@ -278,6 +288,28 @@ const char* dialRequestName(uint8_t request) {
   switch (static_cast<DialRequest>(request)) {
     case DialRequest::GameRestart: return "GAME_RESTART";
     case DialRequest::GameEnd: return "GAME_END";
+  }
+  return nullptr;
+}
+
+const char* staffActionName(uint8_t action) {
+  switch (static_cast<StaffAction>(action)) {
+    case StaffAction::Next: return "NEXT";
+    case StaffAction::Skip: return "SKIP";
+    case StaffAction::Menu: return "MENU";
+    case StaffAction::Recover: return "RECOVER";
+    case StaffAction::Switch: return "SWITCH";
+    case StaffAction::Stop: return "STOP";
+  }
+  return nullptr;
+}
+
+const char* remotePoseName(uint8_t pose) {
+  switch (static_cast<RemotePose>(pose)) {
+    case RemotePose::Open: return "OPEN";
+    case RemotePose::Fist: return "FIST";
+    case RemotePose::Peace: return "PEACE";
+    case RemotePose::Point: return "POINT";
   }
   return nullptr;
 }
@@ -310,6 +342,14 @@ bool decodeEvent(const uint8_t* in, size_t len, EventData& e) {
     case EventCode::DeviceError:
       e.reason = r.u8();
       e.detail = r.u8();
+      break;
+    case EventCode::StaffAction: e.reason = r.u8(); break;
+    case EventCode::RemoteInput:
+      e.buttons = r.u8();
+      e.tilt_x = static_cast<int8_t>(r.u8());
+      e.tilt_y = static_cast<int8_t>(r.u8());
+      e.pose = r.u8();
+      e.frame = r.u16();
       break;
     default: return false;
   }
@@ -400,8 +440,8 @@ size_t encodeStatus(const StatusCommon& c, const IlluminationStatus* il, const D
         .u8(dl->color_r)
         .u8(dl->color_g)
         .u8(dl->color_b);
-  } else {
-    return 0;
+  } else if (c.device_type != static_cast<uint8_t>(DeviceType::StaffRemote)) {
+    return 0;  // the staff remote has the common part only
   }
   return w.ok() ? w.size() : 0;
 }
@@ -447,7 +487,7 @@ bool decodeStatus(const uint8_t* in, size_t len, StatusCommon& c, IlluminationSt
       dl.color_g = r.u8();
       dl.color_b = r.u8();
     }
-  } else {
+  } else if (c.device_type != static_cast<uint8_t>(DeviceType::StaffRemote)) {
     return false;
   }
   return r.ok() && r.atEnd();

@@ -61,7 +61,9 @@ class FakeEmitter : public EventEmitter {
     events.push_back(e);
     return ++next_id;
   }
+  size_t pending() const override { return backlog; }
   bool accept = true;
+  size_t backlog = 0;  // events "not yet acknowledged" (pending())
   size_t count(EventCode c) const {
     size_t n = 0;
     for (const auto& e : events)

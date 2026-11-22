@@ -107,6 +107,7 @@ void flagsToJson(JsonObject o, uint8_t f) {
 const char* stateName(uint8_t device_type, uint8_t s) {
   if (device_type == static_cast<uint8_t>(DeviceType::Dial)) return dialStateName(s);
   if (device_type == static_cast<uint8_t>(DeviceType::Illumination)) return illuminationStateName(s);
+  if (device_type == static_cast<uint8_t>(DeviceType::StaffRemote)) return s ? "ACTIVE" : "IDLE";
   return "UNKNOWN";
 }
 
@@ -138,6 +139,7 @@ const char* deviceTypeName(uint8_t t) {
     case DeviceType::Hub: return "HUB";
     case DeviceType::Illumination: return "ILLUMINATION";
     case DeviceType::Dial: return "DIAL";
+    case DeviceType::StaffRemote: return "STAFF_REMOTE";
   }
   return "UNKNOWN";
 }
@@ -551,6 +553,22 @@ void HubJsonBridge::eventToPc(const PcEvent& e) {
       data["code"] = e.data.reason;
       data["detail"] = e.data.detail;
       break;
+    case EventCode::StaffAction: {
+      const char* act = staffActionName(e.data.reason);
+      data["action"] = act ? act : "UNKNOWN";
+      data["code"] = e.data.reason;
+      break;
+    }
+    case EventCode::RemoteInput: {
+      const char* pose = remotePoseName(e.data.pose);
+      data["move"] = (e.data.buttons & u8(RemoteButton::Move)) != 0;
+      data["z"] = (e.data.buttons & u8(RemoteButton::AxisZ)) != 0;
+      data["x"] = e.data.tilt_x;
+      data["y"] = e.data.tilt_y;
+      data["pose"] = pose ? pose : "OPEN";
+      data["frame"] = e.data.frame;
+      break;
+    }
   }
   emit(d);
 }

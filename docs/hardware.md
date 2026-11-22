@@ -220,6 +220,50 @@ SG90 は動き始めと引っかかったときに最大 0.7 A ほど流れ、M5
 * G15 の LED は NeoGacha では点灯させていなかった。2 系統を同時に光らせたときの電流は**未確認**（サーボ動作中は 2 系統とも減光する）。
 * サーボ動作中は PC 演出も `DIAL_LED_BRIGHTNESS_SERVO` まで暗くなる（電源対策を優先）。
 
+## スタッフ用リモコン（M5StopWatch、Device ID 0x30）
+
+展示のスタッフが、ゲーム（CoreXY_UFO_Game）の画面のボタンやキーボードを使わずに操作するための手元の端末。
+**リモコンは押されたことを送るだけで、どうするかはゲームが決める**（STAFF_ACTION / REMOTE_INPUT、[protocol.md](protocol.md)）。
+ゲーム側の受け取り方はゲームの `docs/staff_operations.md`。
+
+| 項目 | 内容 |
+|---|---|
+| 本体 | M5Stack StopWatch（ESP32-S3R8、16 MB Flash、8 MB PSRAM、1.75 インチ 466×466 円形 AMOLED、タッチ CST820、BMI270、振動モーター） |
+| ボタン | 黄 = KEYA（G2、M5Unified の BtnA）、青 = KEYB（G1、BtnB）、電源ボタン（1 回 = 電源オン / リセット、2 回 = 電源オフ） |
+| ビルド | `pio run -e staff_remote_s2 -t upload`（システム 1 は `_s1`。`default_envs` には入れていない） |
+| 設定 | MAC: `config/devices.h` の `UFO_Sn_MAC_STAFF_REMOTE`（起動ログの `MAC=`、USB のシリアル番号と同じ）。鍵: `config/secrets.h` の `UFO_Sn_LMK_STAFF_REMOTE`（`python3 tests/tools/gen_secrets.py` が足りない鍵だけ足す）。**リモコンを足したら Hub も書き直す**（Hub が知っている機器の表に入る） |
+
+### 画面と操作
+
+円形の画面に 5 つの区画の輪と中央。青ボタンで 2 つの画面を切り替える。いちばん外側の細い輪が接続状態（緑 = ゲームとつながっている、橙 = Hub だけ、赤 = Hub もない）。中央の上の行に画面名・システム番号・電池残量。
+
+**タッチはすべて長押しで送る**: 押している間、区画が内側から満ちていき、満ちたら短く振動して送る。途中で離す・指が区画の外へずれると何も送らない（区画の間の隙間も反応しない）。
+
+| 画面 | 操作 | 長押し | 送るもの |
+|---|---|---|---|
+| スタッフ | 輪: つぎへ / とばす / メニュー / きりかえ | 0.45 秒 | STAFF_ACTION NEXT / SKIP / MENU / SWITCH |
+| | 輪: ふっき（アームが動く） | 1.2 秒 | STAFF_ACTION RECOVER |
+| | 中央: ストップ | 0.25 秒 | STAFF_ACTION STOP |
+| | 黄ボタン | — | STAFF_ACTION NEXT |
+| そうさ | 黄ボタンを押しながら傾ける（押した瞬間の傾きが中心。離すと止まる。中央の点が傾きを表す） | — | REMOTE_INPUT move + x/y |
+| | 輪: じょうげ（オン / オフ）。オンで黄ボタン + 前後（奥 = アームを上げる） | 0.45 秒 | REMOTE_INPUT move + z |
+| | 輪: つかむ / はなす / ポータル（1.2 秒その形を見せてから 0.4 秒パー） | 0.45 秒 | REMOTE_INPUT pose FIST / PEACE / POINT |
+| | 輪: ストップ | 0.25 秒 | STAFF_ACTION STOP |
+
+* 送れなかったとき（Hub や PC とつながっていない）は中央の下の行に赤で出て、長く振動する。
+* 60 秒（`REMOTE_DIM_S`）操作がないと画面を暗くする。暗いときの最初のタッチ・ボタンは画面を戻すだけで、何も送らない。
+* ストップ、Hub の STOP_ALL、セッションの変化、Hub との通信断で入力の送信をやめ、黄ボタンを一度離すまで再開しない。
+* 画面の確認: USB でつないで `uv run --no-project --with pyserial --with pillow python tests/tools/remote_screenshot.py <ポート> out.png`（シリアルの `S` で画面を送る。`P` は画面の切り替え、デバッグ用）。
+
+### 調整（`config/hardware.h`、なければ既定値）
+
+| 名前 | 既定 | 意味 |
+|---|---|---|
+| `REMOTE_TILT_DEAD_DEG` / `REMOTE_TILT_FULL_DEG` | 4 / 25 | 傾きの不感帯と、最高速になる傾き（度） |
+| `REMOTE_TILT_SWAP_XY` / `REMOTE_TILT_INVERT_X` / `REMOTE_TILT_INVERT_Y` | 1 / 0 / 1（StopWatch の IMU は画面に対して 90° 回り、前後が逆。2026-11-22 に実機で確認） | 傾きの軸の入れ替え・反転（画面の十字の点が、傾けた方向に動くように合わせる） |
+| `REMOTE_HOLD_MS` / `REMOTE_STOP_HOLD_MS` / `REMOTE_RECOVER_HOLD_MS` | 450 / 250 / 1200 | 長押しの時間（ふつう / ストップ / ふっき） |
+| `REMOTE_BRIGHTNESS` / `REMOTE_DIM_S` / `REMOTE_VIBRATION` | 160 / 60 / 160 | 画面の明るさ、暗くするまでの秒数、振動の強さ（0 = 振動しない） |
+
 ## 照明モード・演出（Illumination）
 
 | モード | WS2811 | COB |

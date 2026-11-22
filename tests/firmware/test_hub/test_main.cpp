@@ -200,8 +200,13 @@ void test_devices_and_diag() {
   w.runAlive(1500);
   w.pc("{\"type\":\"GET_DEVICES\"}");
   JsonDocument d = w.out.lastOf("DEVICES");
-  TEST_ASSERT_EQUAL(3, d["devices"].size());
+  TEST_ASSERT_EQUAL(4, d["devices"].size());  // + the staff remote (0x30, not simulated here)
   for (JsonObject o : d["devices"].as<JsonArray>()) {
+    if (o["id"].as<int>() == static_cast<int>(DeviceId::StaffRemote)) {
+      TEST_ASSERT_FALSE(o["online"].as<bool>());
+      TEST_ASSERT_EQUAL_STRING("staff_remote", o["name"].as<const char*>());
+      continue;
+    }
     TEST_ASSERT_TRUE(o["online"].as<bool>());
     TEST_ASSERT_TRUE(o["session_ok"].as<bool>());
   }

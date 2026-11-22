@@ -128,3 +128,17 @@
 // 0: the strip is fed from the M5Dial 5 V -> dimmed to DIAL_LED_BRIGHTNESS_SERVO
 //    while the servo runs. 1: own 5 V supply (GND shared) -> never dimmed.
 #define DIAL_TRANSFER_LED_SEPARATE_POWER 0
+
+// ---- Staff remote (M5StopWatch, docs/hardware.md) ----
+// Tilt = a relative stick: the orientation when the yellow key went down is the centre.
+#define REMOTE_TILT_DEAD_DEG 4         // dead zone (degrees)
+#define REMOTE_TILT_FULL_DEG 25        // tilt for full speed
+#define REMOTE_TILT_SWAP_XY 1          // the StopWatch IMU is turned 90 deg to the screen and its
+#define REMOTE_TILT_INVERT_X 0         // forward axis reversed (checked on the device 2026-11-22)
+#define REMOTE_TILT_INVERT_Y 1
+#define REMOTE_HOLD_MS 450             // every touch operation is a press-and-hold this long
+#define REMOTE_STOP_HOLD_MS 250        // ストップ
+#define REMOTE_RECOVER_HOLD_MS 1200    // ふっき (the arm moves)
+#define REMOTE_BRIGHTNESS 160
+#define REMOTE_DIM_S 60                // dim the screen after this long without input
+#define REMOTE_VIBRATION 255           // strength of the clicks, 0 = no vibration

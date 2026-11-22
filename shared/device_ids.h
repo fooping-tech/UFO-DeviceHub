@@ -17,6 +17,7 @@ enum class DeviceId : uint8_t {
   Illumination = 0x10,
   M5Dial1 = 0x20,
   M5Dial2 = 0x21,
+  StaffRemote = 0x30,  // M5StopWatch: the exhibition staff's remote (fw 0.6+)
 };
 
 constexpr uint8_t kBroadcastId = 0xFF;  // never accepted as a destination

@@ -481,6 +481,45 @@ class MockDial(MockDevice):
         return s
 
 
+class MockRemote(MockDevice):
+    """The staff remote (M5StopWatch, 0x30): it only reports (STAFF_ACTION, REMOTE_INPUT);
+    of the commands it takes STOP_ALL (ends its input stream), the others are UNSUPPORTED."""
+
+    device_type = "STAFF_REMOTE"
+
+    def __init__(self, dev_id: int, hub: MockHub) -> None:
+        super().__init__(dev_id, hub)
+        self.frame = 0
+
+    def execute(self, name: str, p: dict, cid: int) -> tuple[str, bool]:
+        if name == "STOP_ALL":
+            return "ACCEPTED", False
+        return "UNSUPPORTED", False
+
+    def state(self) -> str:
+        return "IDLE"
+
+    def staff(self, action: str) -> bool:
+        """A staff operation pressed on the remote (needs a session, like the real one)."""
+        a = P.StaffAction[action]
+        if not self.online or not self.session:
+            return False
+        self.emit("STAFF_ACTION", action=a.name, code=int(a))
+        return True
+
+    def input(self, *, move: bool = False, z: bool = False, x: int = 0, y: int = 0, pose: str = "OPEN") -> bool:
+        """One REMOTE_INPUT frame (the move key, the tilt -100..100, the hand shape)."""
+        p = P.RemotePose[pose]
+        if not -100 <= int(x) <= 100 or not -100 <= int(y) <= 100:
+            raise ValueError("tilt is -100..100")
+        if not self.online or not self.session:
+            return False
+        self.frame = (self.frame + 1) & 0xFFFF
+        self.emit("REMOTE_INPUT", move=bool(move), z=bool(z and move), x=int(x), y=int(y), pose=p.name,
+                  frame=self.frame)
+        return True
+
+
 @dataclass
 class _PcEvent:
     source: int
@@ -493,7 +532,7 @@ class _PcEvent:
 
 
 class MockHub:
-    """Simulated hub (+ Illumination + 2 M5Dials) behind a LineTransport API."""
+    """Simulated hub (+ Illumination + 2 M5Dials + the staff remote) behind a LineTransport API."""
 
     def __init__(self, config: MockConfig | None = None, *, autostart: bool = True) -> None:
         self.cfg = config or MockConfig()
@@ -515,6 +554,7 @@ class MockHub:
             DeviceId.ILLUMINATION: MockIllumination(DeviceId.ILLUMINATION, self),
             DeviceId.M5DIAL_1: MockDial(DeviceId.M5DIAL_1, self),
             DeviceId.M5DIAL_2: MockDial(DeviceId.M5DIAL_2, self),
+            DeviceId.STAFF_REMOTE: MockRemote(DeviceId.STAFF_REMOTE, self),
         }
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
@@ -574,6 +614,16 @@ class MockHub:
         with self._lock:
             dev = self.devices[int(device_id)]
             return isinstance(dev, MockDial) and dev.request(request)
+
+    def staff_action(self, action: str) -> bool:
+        """A staff operation (NEXT / SKIP / MENU / RECOVER / SWITCH / STOP) pressed on the remote."""
+        with self._lock:
+            return self.devices[DeviceId.STAFF_REMOTE].staff(action)
+
+    def remote_input(self, **frame) -> bool:
+        """One REMOTE_INPUT frame from the remote: move, z, x, y (-100..100), pose."""
+        with self._lock:
+            return self.devices[DeviceId.STAFF_REMOTE].input(**frame)
 
     def set_device_online(self, device_id: int, online: bool, *, reboot: bool = False) -> None:
         with self._lock:

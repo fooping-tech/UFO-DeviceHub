@@ -132,6 +132,9 @@ def test_set_mist_and_new_light_modes():
     assert P.normalize_command("SET_LIGHT_MODE", {"mode": "MAGIC_PUFF"})["mode"] == "MAGIC_PUFF"
     assert P.encode_event_payload(P.EventCode.MIST_DONE, on_s=95, reason=0).hex() == "215f0000"
     assert P.encode_event_payload(P.EventCode.DIAL_REQUEST, request=P.DialRequest.GAME_END).hex() == "1402"
+    assert P.encode_event_payload(P.EventCode.STAFF_ACTION, action=P.StaffAction.RECOVER).hex() == "4004"
+    assert P.encode_event_payload(P.EventCode.REMOTE_INPUT, buttons=3, x=-100, y=42, pose=P.RemotePose.POINT,
+                                  frame=0xBEEF).hex() == "41039c2a03efbe"
 
 
 def test_system_magic_and_hello():

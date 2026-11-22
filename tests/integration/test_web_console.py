@@ -49,7 +49,7 @@ def test_page_and_meta(console):
     m = json.loads(body)
     assert m["connected"] and m["hub"]["system_id"] == 1
     assert "MIST_GLOW" in m["enums"]["light_modes"] and "PUFF" in m["enums"]["mist_patterns"]
-    assert {d["name"] for d in m["enums"]["devices"]} == {"ILLUMINATION", "M5DIAL_1", "M5DIAL_2"}
+    assert {d["name"] for d in m["enums"]["devices"]} == {"ILLUMINATION", "M5DIAL_1", "M5DIAL_2", "STAFF_REMOTE"}
 
 
 def test_command_status_and_devices(console):
@@ -61,7 +61,7 @@ def test_command_status_and_devices(console):
     st = json.loads(body)
     assert st["mist_pattern"] == "BREATH" and st["state"] == "MIST_ACTIVE"
     code, body = req(console, "/api/devices")
-    assert code == 200 and len(json.loads(body)["devices"]) == 3
+    assert code == 200 and len(json.loads(body)["devices"]) == 4
     code, body = req(console, "/api/stop_all", {})
     assert code == 200 and all(v["result"] == "ACCEPTED" for v in json.loads(body).values())
     code, body = req(console, "/api/diag")

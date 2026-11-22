@@ -10,7 +10,8 @@ namespace ufo {
 namespace {
 HubScreen g_last;
 bool g_drawn = false;
-const char* const kChildNames[] = {"ILL", "D1", "D2", "D3", "D4", "D5", "D6", "D7"};
+// the children in the order of the device table (shared/device_registry.cpp)
+const char* const kChildNames[] = {"IL", "D1", "D2", "SW", "C5", "C6", "C7", "C8"};
 uint16_t systemColor(uint8_t id) { return id == 1 ? TFT_CYAN : (id == 2 ? TFT_ORANGE : TFT_MAGENTA); }
 }  // namespace
 
@@ -60,7 +61,7 @@ void hubDisplayShow(const HubScreen& s) {
     d.fillCircle(x + 5, 95, 5, on ? TFT_GREEN : TFT_DARKGREY);
     d.setTextColor(on ? TFT_WHITE : TFT_DARKGREY, TFT_BLACK);
     d.drawString(kChildNames[i], x + 13, 88);
-    x += 42;
+    x += 31;  // 4 children on the 128 px screen
   }
   if (s.problem || s.example_keys) {
     d.fillRect(0, 108, d.width(), 20, TFT_RED);

@@ -134,6 +134,30 @@
    "system_id": 1
   },
   {
+   "name": "event_staff_action",
+   "source": 48,
+   "destination": 1,
+   "message_type": 2,
+   "sequence": 22,
+   "session_id": 2712847316,
+   "command_id": 81,
+   "payload_hex": "4004",
+   "hex": "4655013001021600d4c3b2a151000000024004",
+   "system_id": 1
+  },
+  {
+   "name": "event_remote_input",
+   "source": 48,
+   "destination": 1,
+   "message_type": 2,
+   "sequence": 23,
+   "session_id": 2712847316,
+   "command_id": 82,
+   "payload_hex": "4101db64010102",
+   "hex": "4655013001021700d4c3b2a152000000074101db64010102",
+   "system_id": 1
+  },
+  {
    "name": "event_relay_done",
    "source": 16,
    "destination": 1,

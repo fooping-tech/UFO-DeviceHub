@@ -34,6 +34,17 @@
 #define UFO_S2_MAC_M5DIAL_2 {0x02, 0x00, 0x00, 0x00, 0x02, 0x21}
 #endif
 
+// ---------------- Staff remote (M5StopWatch, ID 0x30) ----------------
+// Added after the first release: a devices.h written before it has no entry, so a
+// placeholder is used (the remote then stays offline). Put the real MAC (printed on
+// boot, also the USB serial number of the StopWatch) into config/devices.h.
+#ifndef UFO_S1_MAC_STAFF_REMOTE
+#define UFO_S1_MAC_STAFF_REMOTE {0x02, 0x00, 0x00, 0x00, 0x01, 0x30}  // PLACEHOLDER
+#endif
+#ifndef UFO_S2_MAC_STAFF_REMOTE
+#define UFO_S2_MAC_STAFF_REMOTE {0x02, 0x00, 0x00, 0x00, 0x02, 0x30}  // PLACEHOLDER
+#endif
+
 // Optional timing overrides (defaults in shared/link_config.h):
 // #define UFO_HEARTBEAT_INTERVAL_MS 1000
 // #define UFO_LINK_TIMEOUT_MS 3000
