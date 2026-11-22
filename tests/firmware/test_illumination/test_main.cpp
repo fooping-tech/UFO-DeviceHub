@@ -4,6 +4,7 @@
 
 #include "../support.h"
 #include "illumination/illumination_controller.h"
+#include "illumination/shelf_layout.h"
 
 using namespace ufo;
 using namespace testsupport;
@@ -392,6 +393,94 @@ void test_local_mode_disabled_by_config() {
   TEST_ASSERT_FALSE(r.mist_pin.on);
 }
 
+// ---- shelf layout: wiring order kept apart from the place on the shelf ----
+using shelf::From;
+using shelf::Part;
+
+void test_shelf_layout_counts() {
+  TEST_ASSERT_EQUAL(23, shelf::kLedCount);
+  TEST_ASSERT_EQUAL(4, shelf::partCount(Part::FrontLeft));
+  TEST_ASSERT_EQUAL(7, shelf::partCount(Part::Front));
+  TEST_ASSERT_EQUAL(4, shelf::partCount(Part::FrontRight));
+  TEST_ASSERT_EQUAL(4, shelf::partCount(Part::BackRight));
+  TEST_ASSERT_EQUAL(4, shelf::partCount(Part::BackLeft));
+  TEST_ASSERT_EQUAL(0, shelf::partCount(Part::Unused));
+}
+
+void test_shelf_layout_index_follows_the_wiring() {
+  // front-left pillar, wired top -> bottom: 0..3
+  TEST_ASSERT_EQUAL(0, shelf::index(Part::FrontLeft, 0, From::Top));
+  TEST_ASSERT_EQUAL(3, shelf::index(Part::FrontLeft, 0, From::Bottom));
+  // front face, left -> right: 4..10
+  TEST_ASSERT_EQUAL(4, shelf::index(Part::Front, 0, From::Left));
+  TEST_ASSERT_EQUAL(10, shelf::index(Part::Front, 0, From::Right));
+  TEST_ASSERT_EQUAL(7, shelf::index(Part::Front, 3, From::Left));
+  // front-right pillar, wired bottom -> top: 11 is the bottom, 14 the top
+  TEST_ASSERT_EQUAL(14, shelf::index(Part::FrontRight, 0, From::Top));
+  TEST_ASSERT_EQUAL(11, shelf::index(Part::FrontRight, 0, From::Bottom));
+  // back-right, top -> bottom: 15..18
+  TEST_ASSERT_EQUAL(15, shelf::index(Part::BackRight, 0, From::Top));
+  TEST_ASSERT_EQUAL(18, shelf::index(Part::BackRight, 3, From::Top));
+  // back-left, bottom -> top: 19 bottom, 22 top
+  TEST_ASSERT_EQUAL(22, shelf::index(Part::BackLeft, 0, From::Top));
+  TEST_ASSERT_EQUAL(19, shelf::index(Part::BackLeft, 0, From::Bottom));
+  // out of range / an end that does not fit the part
+  TEST_ASSERT_EQUAL(-1, shelf::index(Part::FrontLeft, 4, From::Top));
+  TEST_ASSERT_EQUAL(-1, shelf::index(Part::FrontLeft, 0, From::Left));
+  TEST_ASSERT_EQUAL(-1, shelf::index(Part::Front, 0, From::Top));
+  TEST_ASSERT_EQUAL(-1, shelf::index(Part::Unused, 0, From::Top));
+}
+
+void test_shelf_layout_same_height_on_every_pillar() {
+  // "the top of every pillar" is one height whichever way the pillar is wired
+  for (Part p : shelf::kPillars) {
+    shelf::Pixel top = shelf::pixel(static_cast<uint16_t>(shelf::index(p, 0, From::Top)));
+    shelf::Pixel bottom = shelf::pixel(static_cast<uint16_t>(shelf::index(p, 0, From::Bottom)));
+    TEST_ASSERT_EQUAL(p, top.part);
+    TEST_ASSERT_EQUAL(255, top.height);
+    TEST_ASSERT_EQUAL(0, bottom.height);
+    TEST_ASSERT_EQUAL(0, top.pos);
+    TEST_ASSERT_EQUAL(3, bottom.pos);
+    TEST_ASSERT_EQUAL(top.around, bottom.around);
+  }
+  TEST_ASSERT_EQUAL(170, shelf::pixel(static_cast<uint16_t>(shelf::index(Part::FrontRight, 1, From::Top))).height);
+}
+
+void test_shelf_layout_around_the_shelf() {
+  TEST_ASSERT_EQUAL(0, shelf::pixel(0).around);     // front-left
+  TEST_ASSERT_EQUAL(64, shelf::pixel(11).around);   // front-right
+  TEST_ASSERT_EQUAL(128, shelf::pixel(15).around);  // back-right
+  TEST_ASSERT_EQUAL(192, shelf::pixel(19).around);  // back-left
+  // the front face runs from the left pillar to the right one, in order
+  uint8_t last = 0;
+  for (uint8_t k = 0; k < 7; k++) {
+    shelf::Pixel px = shelf::pixel(static_cast<uint16_t>(shelf::index(Part::Front, k, From::Left)));
+    TEST_ASSERT_EQUAL(Part::Front, px.part);
+    TEST_ASSERT_EQUAL(k, px.pos);
+    TEST_ASSERT_EQUAL(shelf::kFrontHeight, px.height);
+    TEST_ASSERT_TRUE(px.around > last && px.around < 64);
+    last = px.around;
+  }
+  TEST_ASSERT_EQUAL(Part::Unused, shelf::pixel(shelf::kLedCount).part);
+}
+
+void test_shelf_layout_every_pixel_once() {
+  // every pixel of the chain is reached exactly once through its place
+  bool seen[shelf::kLedCount] = {};
+  const Part parts[] = {Part::FrontLeft, Part::Front, Part::FrontRight, Part::BackRight, Part::BackLeft};
+  for (Part p : parts)
+    for (uint8_t k = 0; k < shelf::partCount(p); k++) {
+      int16_t i = shelf::index(p, k, shelf::isPillar(p) ? From::Top : From::Left);
+      TEST_ASSERT_TRUE(i >= 0 && i < shelf::kLedCount);
+      TEST_ASSERT_FALSE(seen[i]);
+      seen[i] = true;
+      shelf::Pixel px = shelf::pixel(static_cast<uint16_t>(i));
+      TEST_ASSERT_EQUAL(p, px.part);
+      TEST_ASSERT_EQUAL(k, px.pos);
+    }
+  for (bool b : seen) TEST_ASSERT_TRUE(b);
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_boot_relay_off);
@@ -412,5 +501,10 @@ int main() {
   RUN_TEST(test_local_scenes_without_pc);
   RUN_TEST(test_pc_session_takes_over_local_mode);
   RUN_TEST(test_local_mode_disabled_by_config);
+  RUN_TEST(test_shelf_layout_counts);
+  RUN_TEST(test_shelf_layout_index_follows_the_wiring);
+  RUN_TEST(test_shelf_layout_same_height_on_every_pillar);
+  RUN_TEST(test_shelf_layout_around_the_shelf);
+  RUN_TEST(test_shelf_layout_every_pixel_once);
   return UNITY_END();
 }

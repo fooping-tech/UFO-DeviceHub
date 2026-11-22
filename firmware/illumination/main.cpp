@@ -219,6 +219,9 @@ void setup() {
   g_app.begin(now);
   g_renderer.begin(ILLUM_LED_MAX_BRIGHTNESS, ILLUM_COB_PIN, ILLUM_COB_MAX_BRIGHTNESS);
   g_renderer.colorOrderTest();
+#if !defined(ILLUM_LAYOUT_TEST_AT_BOOT) || ILLUM_LAYOUT_TEST_AT_BOOT
+  g_renderer.layoutTest();
+#endif
   g_runtime.begin();
 
   for (uint8_t i = 0; i < kRelayCount; ++i)

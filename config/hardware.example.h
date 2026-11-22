@@ -13,12 +13,15 @@
 // ---------------- Illumination ATOM ----------------
 // ATOM Lite + Atomic PWM Base + Unit 2Relay (the former atom_led_mist setup):
 //   COB tape (warm white, 12V)  Atomic PWM Base, PWM input = G22
-//   WS2811 tape (12V, 70 ICs)   data = G21 (the base's "21" hole)
+//   WS2811 on the shelf (12V)   data = G21 (the base's "21" hole), 23 ICs:
+//                               4 pillars x 4 + the front face 7 (where each one is:
+//                               firmware/illumination/shelf_layout.h)
 //   mist module (5V)            Unit 2Relay RELAY-2, Grove yellow = G32
 //   button                      ATOM built-in, G39
 #define ILLUM_STATUS_LED_PIN 27        // ATOM Lite built-in SK6812
 #define ILLUM_LED_PIN 21               // WS2811 data
-#define ILLUM_LED_COUNT 70             // 14 IC/m x 5 m
+#define ILLUM_LED_COUNT 23             // WS2811 ICs; must equal the shelf layout (build error otherwise)
+#define ILLUM_LAYOUT_TEST_AT_BOOT 1    // 1: after the colour check, walk the pillars / front face once
 #define ILLUM_LED_CHIPSET WS2811       // FastLED chipset (WS2812B for 5V pixel strips)
 #define ILLUM_LED_COLOR_ORDER GRB      // boot test: red -> green -> blue means the order is right
 #define ILLUM_LED_MAX_BRIGHTNESS 200   // global cap (0-255) for power budget

@@ -1,6 +1,7 @@
 # UFO-DeviceHub
 
-UFO Game の ESP マイコン系デバイス（Hub、Illumination、M5Dial ×2）の通信システム。
+UFO Game の ESP マイコン系デバイス（Hub、Illumination、M5Dial、スタッフ用リモコン）の通信システム。
+**Dial はシステムごとに 1 台**（Dial1 = ID 0x20）。2 台目の ID 0x21（`m5dial_2_*` env）はプロトコル・ファーム・テストに残しているが、展示では使わない（ゲームは CoreXY_UFO_Game #200 から Dial1 だけを使う）。
 共通プロトコル、4 種類のファームウェア、PC 用 Python ライブラリ、Mock、テストを 1 つのプロジェクトで管理する。
 **同じ会場で 2 システムを同時に運用できる**（チャネル・鍵・MAC 表・パケット magic をシステムごとに分離。[docs/multi-system.md](docs/multi-system.md)）。
 
@@ -16,20 +17,20 @@ UFO Game の ESP マイコン系デバイス（Hub、Illumination、M5Dial ×2�
 | コントローラ ATOM | 物理コントローラ（ボタン・ジェスチャー等） | Core2 と ESP-NOW |
 | **ESP-NOW 用ハブ（M5AtomS3R）** | 子機との無線連携、中継。画面にシステム番号・チャネル・接続状態を表示 | PC から USB、子機と無線 |
 | **イルミ ATOM** | WS2811 テープ + COB テープの照明演出、ミスト（噴霧）モジュール、本体ボタンでのローカル演出 | ハブと無線 |
-| **M5Dial ×2** | ボール受取スイッチ、SG90 によるボール排出、状態表示 | ハブと無線 |
+| **M5Dial（システムごとに 1 台、ID 0x20）** | ボール受取スイッチ、SG90 によるボール排出、状態表示 | ハブと無線 |
 | **スタッフ用リモコン（M5StopWatch）** | 展示スタッフの手元の操作: ゲームのスタッフ操作（つぎへ・とばす・メニュー・ふっき・きりかえ・ストップ）と、カメラを使わない操作（ボタン + 傾きで移動、つかむ・はなす・ポータル） | ハブと無線 |
 
-**このリポジトリが扱うのは太字の機器（ESP-NOW 用 ATOM ハブ、イルミ ATOM、M5Dial ×2、スタッフ用リモコン）と、PC 側のクライアントライブラリ。**
+**このリポジトリが扱うのは太字の機器（ESP-NOW 用 ATOM ハブ、イルミ ATOM、M5Dial、スタッフ用リモコン）と、PC 側のクライアントライブラリ。**
 Core2・Core XYZ・コントローラ ATOM は 別リポジトリ（CoreXY_UFO / CoreXY_UFO_Game）で扱う。
 
 図ではハブと子機の間が「Wi-Fi（LAN 内通信）」と描かれているが、実装は AP に接続しない **ESP-NOW の暗号化ユニキャスト（固定チャネル）**。
 
 ```
-PC (pc/DeviceGateway) --USB JSON Lines--> Hub (M5AtomS3R) --ESP-NOW 暗号化ユニキャスト--> Illumination ATOM / M5Dial #1 / M5Dial #2
+PC (pc/DeviceGateway) --USB JSON Lines--> Hub (M5AtomS3R) --ESP-NOW 暗号化ユニキャスト--> Illumination ATOM / M5Dial (0x20) / スタッフ用リモコン
 ```
 
 * ゲームロジックは PC のみ。Hub は中継・再送・セッション・死活監視、子機は I/O とフェイルセーフだけ。
-* 詳細: [docs/multi-system.md](docs/multi-system.md)（2 システム運用・混信対策）, [docs/protocol.md](docs/protocol.md)（プロトコル・API）, [docs/game-mode-interface.md](docs/game-mode-interface.md)（ゲームモード: 左右 Dial の LED 演出・排出同期の契約）, [docs/architecture.md](docs/architecture.md), [docs/hardware.md](docs/hardware.md)（ピン・角度・安全仕様）, [docs/test-plan.md](docs/test-plan.md)（自動テストと実機確認手順）
+* 詳細: [docs/multi-system.md](docs/multi-system.md)（2 システム運用・混信対策）, [docs/protocol.md](docs/protocol.md)（プロトコル・API）, [docs/game-mode-interface.md](docs/game-mode-interface.md)（ゲームモード: Dial の LED 演出・排出同期の契約）, [docs/architecture.md](docs/architecture.md), [docs/hardware.md](docs/hardware.md)（ピン・角度・安全仕様）, [docs/test-plan.md](docs/test-plan.md)（自動テストと実機確認手順）
 
 ## 同じ会場で 2 システムを動かす（混信対策）
 
@@ -86,11 +87,11 @@ PLATFORMIO_BUILD_FLAGS=-DUFO_ALLOW_EXAMPLE_CONFIG pio run
 ## ビルド・書込み
 
 ```sh
-pio run                                       # 両システム × 4 台（hub_s1 ... m5dial_2_s2。未設定のシステムはエラー）
+pio run                                       # 両システムの default_envs（hub_s1 ... m5dial_2_s2。未設定のシステムはエラー）
 pio run -e hub_s1          -t upload          # Hub (M5AtomS3R)            システム 1
 pio run -e illumination_s1 -t upload          # Illumination ATOM (0x10)  システム 1
 pio run -e m5dial_1_s1     -t upload          # M5Dial #1 (0x20)          システム 1
-pio run -e m5dial_2_s1     -t upload          # M5Dial #2 (0x21)          システム 1
+# m5dial_2_s1 / m5dial_2_s2（ID 0x21）は 2 台目用。いまは各システム Dial 1 台なので書き込まない
 pio run -e hub_s2          -t upload          # ... システム 2 は _s2
 pio run -e staff_remote_s2 -t upload          # スタッフ用リモコン M5StopWatch (0x30)  システム 2（Hub も書き直す）
 pio run -e hub_atomlite_s1 -t upload          # Hub を ATOM Lite にする場合（画面なし、状態 LED）
